@@ -1,0 +1,287 @@
+{
+  "name": "Monitoring & KPIs Dashboard",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24
+            }
+          ]
+        }
+      },
+      "id": "schedule-daily",
+      "name": "Tous les jours 9h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- KPIs Dernières 24h\nSELECT \n  COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') as opportunites_24h,\n  COUNT(*) FILTER (WHERE statut = 'ACHAT_PRIORITAIRE') as a_acheter,\n  COUNT(*) FILTER (WHERE statut = 'EN_VENTE') as en_vente,\n  COUNT(*) FILTER (WHERE statut = 'VENDU') as vendus_total,\n  AVG(score) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') as score_moyen,\n  SUM(prix_achat) FILTER (WHERE statut IN ('EN_VENTE', 'VENDU')) as capital_engage,\n  SUM(prix_vente) FILTER (WHERE statut = 'VENDU') as ca_total,\n  SUM(prix_vente - prix_achat) FILTER (WHERE statut = 'VENDU') as profit_total\nFROM opportunites;",
+        "options": {}
+      },
+      "id": "postgres-kpis",
+      "name": "KPIs Globaux",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credentials",
+          "name": "PostgreSQL Outillage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Top 10 opportunités manquées\nSELECT \n  titre,\n  prix_achat,\n  score,\n  marques_detectees->>'marque' as marque,\n  facteurs->>'roi_estime' as roi_estime,\n  created_at\nFROM opportunites\nWHERE score > 0.8 \n  AND statut = 'DETECTE'\n  AND created_at > NOW() - INTERVAL '7 days'\nORDER BY score DESC\nLIMIT 10;",
+        "options": {}
+      },
+      "id": "postgres-missed",
+      "name": "Opportunités Manquées",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 480],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credentials",
+          "name": "PostgreSQL Outillage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Performance par marque\nSELECT \n  marques_detectees->>'marque' as marque,\n  COUNT(*) as nombre_total,\n  COUNT(*) FILTER (WHERE statut = 'VENDU') as nombre_vendus,\n  AVG(score) as score_moyen,\n  AVG((prix_vente - prix_achat)::float / NULLIF(prix_achat, 0)) as roi_moyen,\n  SUM(prix_vente - prix_achat) FILTER (WHERE statut = 'VENDU') as profit_total\nFROM opportunites\nWHERE marques_detectees IS NOT NULL\nGROUP BY marque\nORDER BY profit_total DESC NULLS LAST;",
+        "options": {}
+      },
+      "id": "postgres-marques",
+      "name": "Stats par Marque",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 660],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credentials",
+          "name": "PostgreSQL Outillage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Génération du rapport quotidien\nconst kpis = $input.all()[0].json;\nconst missed = $input.all()[1].json;\nconst marques = $input.all()[2].json;\n\n// Formatage KPIs\nconst opportunites_24h = kpis.opportunites_24h || 0;\nconst a_acheter = kpis.a_acheter || 0;\nconst en_vente = kpis.en_vente || 0;\nconst vendus = kpis.vendus_total || 0;\nconst score_moyen = (kpis.score_moyen * 100).toFixed(1) || 0;\nconst capital = kpis.capital_engage || 0;\nconst ca = kpis.ca_total || 0;\nconst profit = kpis.profit_total || 0;\nconst roi_global = capital > 0 ? ((profit / capital) * 100).toFixed(1) : 0;\n\n// Top 3 marques\nconst top_marques = marques.slice(0, 3).map((m, i) => \n  `${i + 1}. ${m.marque?.toUpperCase() || 'N/A'} - ${m.nombre_vendus || 0} vendus - ${(m.roi_moyen * 100).toFixed(0)}% ROI`\n).join('\\n');\n\n// Opportunités manquées\nconst missed_list = missed.slice(0, 5).map(m => \n  `• ${m.titre?.substring(0, 40) || 'N/A'} - ${m.prix_achat}€ (score: ${(m.score * 100).toFixed(0)}%)`\n).join('\\n');\n\nconst rapport = `📊 *Rapport Quotidien FlipFinder*\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n📈 *KPIs Globaux*\n• Opportunités détectées (24h) : ${opportunites_24h}\n• À acheter : ${a_acheter}\n• En vente : ${en_vente}\n• Vendus (total) : ${vendus}\n• Score moyen : ${score_moyen}%\n\n💰 *Financier*\n• Capital engagé : ${capital}€\n• CA total : ${ca}€\n• Profit total : ${profit}€\n• ROI global : ${roi_global}%\n\n🏆 *Top 3 Marques*\n${top_marques || 'Aucune donnée'}\n\n⚠️ *Top 5 Opportunités Manquées*\n${missed_list || 'Aucune'}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n🤖 FlipFinder - ${new Date().toLocaleDateString('fr-FR')}`;\n\nreturn [{\n  json: {\n    rapport,\n    kpis: {\n      opportunites_24h,\n      a_acheter,\n      en_vente,\n      vendus,\n      capital,\n      ca,\n      profit,\n      roi_global\n    }\n  }\n}];"
+      },
+      "id": "code-rapport",
+      "name": "Génération Rapport",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [670, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.rapport }}",
+        "additionalFields": {
+          "parseMode": "Markdown"
+        }
+      },
+      "id": "telegram-rapport",
+      "name": "Envoi Rapport Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [880, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot-credentials",
+          "name": "Telegram Bot FlipFinder"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "schema": "public"
+        },
+        "table": {
+          "table": "kpis_historique"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ new Date().toISOString() }}",
+            "opportunites_detectees": "={{ $json.kpis.opportunites_24h }}",
+            "articles_en_vente": "={{ $json.kpis.en_vente }}",
+            "articles_vendus": "={{ $json.kpis.vendus }}",
+            "capital_engage": "={{ $json.kpis.capital }}",
+            "ca_total": "={{ $json.kpis.ca }}",
+            "profit_total": "={{ $json.kpis.profit }}",
+            "roi_global": "={{ $json.kpis.roi_global }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "postgres-historique",
+      "name": "Sauvegarder Historique",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [880, 480],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credentials",
+          "name": "PostgreSQL Outillage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-alert",
+              "leftValue": "={{ $json.kpis.a_acheter }}",
+              "rightValue": 5,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-alerts",
+      "name": "Alertes Si > 5 à acheter",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [1090, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=⚡ *ALERTE STOCK*\n\nVous avez {{ $json.kpis.a_acheter }} opportunités prioritaires en attente d'achat !\n\n🎯 Action recommandée : Reviewer les opportunités ACHAT_PRIORITAIRE",
+        "additionalFields": {
+          "parseMode": "Markdown"
+        }
+      },
+      "id": "telegram-alert",
+      "name": "Alerte Action Requise",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1300, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot-credentials",
+          "name": "Telegram Bot FlipFinder"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Tous les jours 9h": {
+      "main": [
+        [
+          {
+            "node": "KPIs Globaux",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Opportunités Manquées",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Stats par Marque",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "KPIs Globaux": {
+      "main": [
+        [
+          {
+            "node": "Génération Rapport",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Opportunités Manquées": {
+      "main": [
+        [
+          {
+            "node": "Génération Rapport",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Stats par Marque": {
+      "main": [
+        [
+          {
+            "node": "Génération Rapport",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Génération Rapport": {
+      "main": [
+        [
+          {
+            "node": "Envoi Rapport Telegram",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Sauvegarder Historique",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Alertes Si > 5 à acheter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alertes Si > 5 à acheter": {
+      "main": [
+        [
+          {
+            "node": "Alerte Action Requise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2024-10-31T00:00:00.000Z",
+  "versionId": "1"
+}

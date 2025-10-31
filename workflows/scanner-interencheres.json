@@ -1,0 +1,214 @@
+{
+  "name": "Scanner Interenchères - Outillage Pro",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Toutes les 30min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://www.interencheres.com/recherche/?keyword={{ $json.keyword }}&cat=14",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": true
+            }
+          }
+        }
+      },
+      "id": "http-request-interencheres",
+      "name": "Scan Interenchères",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [670, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const keywords = [\n  'hilti',\n  'festool',\n  'milwaukee',\n  'makita',\n  'dewalt',\n  'bosch pro',\n  'metabo',\n  'liquidation judiciaire',\n  'cessation activite',\n  'fermeture entreprise'\n];\n\nreturn keywords.map(keyword => ({ json: { keyword } }));"
+      },
+      "id": "code-keywords",
+      "name": "Mots-clés Premium",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extraction et scoring des résultats\nconst html = $input.first().json.body;\nconst keyword = $input.first().json.keyword;\n\n// Patterns de détection\nconst MARQUES_PREMIUM = {\n  'hilti': 2.5,\n  'festool': 2.3,\n  'milwaukee': 2.1,\n  'makita': 2.0,\n  'dewalt': 1.9,\n  'bosch': 1.7,\n  'metabo': 1.8\n};\n\nconst SIGNAUX_LIQUIDATION = [\n  { pattern: /liquidation\\s+judiciaire/i, score: 0.3 },\n  { pattern: /cessation\\s+activit[ée]/i, score: 0.3 },\n  { pattern: /fermeture\\s+entreprise/i, score: 0.25 },\n  { pattern: /d[ée]part\\s+retraite/i, score: 0.2 },\n  { pattern: /urgent/i, score: 0.15 }\n];\n\n// Parse HTML (simplified - à améliorer avec cheerio)\nconst results = [];\n\n// Exemple de parsing basique\nconst regex = /<div class=\"item\"[^>]*>([\\s\\S]*?)<\\/div>/gi;\nlet match;\n\nwhile ((match = regex.exec(html)) !== null) {\n  const itemHtml = match[1];\n  \n  // Extraction titre\n  const titleMatch = /<h3[^>]*>([^<]+)<\\/h3>/i.exec(itemHtml);\n  const titre = titleMatch ? titleMatch[1].trim() : '';\n  \n  // Extraction prix\n  const priceMatch = /(\\d+)\\s*€/i.exec(itemHtml);\n  const prix = priceMatch ? parseInt(priceMatch[1]) : 0;\n  \n  // Extraction lien\n  const linkMatch = /href=\"([^\"]+)\"/i.exec(itemHtml);\n  const url = linkMatch ? 'https://www.interencheres.com' + linkMatch[1] : '';\n  \n  // Calcul du score\n  let score = 0;\n  let marque_detectee = null;\n  let multiplicateur = 1;\n  \n  // Détection marque\n  for (const [marque, mult] of Object.entries(MARQUES_PREMIUM)) {\n    if (titre.toLowerCase().includes(marque)) {\n      marque_detectee = marque;\n      multiplicateur = mult;\n      score += 0.4;\n      break;\n    }\n  }\n  \n  // Détection signaux liquidation\n  for (const signal of SIGNAUX_LIQUIDATION) {\n    if (signal.pattern.test(titre)) {\n      score += signal.score;\n    }\n  }\n  \n  // Score prix (plus c'est bas, mieux c'est)\n  if (prix > 0 && prix < 100) score += 0.3;\n  else if (prix < 200) score += 0.2;\n  else if (prix < 500) score += 0.1;\n  \n  // Estimation ROI\n  const valeur_estimee = prix * multiplicateur;\n  const roi_estime = multiplicateur - 1;\n  \n  if (score > 0.5) {\n    results.push({\n      json: {\n        titre,\n        prix,\n        url,\n        keyword,\n        score: Math.min(score, 1),\n        marque_detectee,\n        multiplicateur,\n        valeur_estimee,\n        roi_estime,\n        statut: 'DETECTE',\n        date_detection: new Date().toISOString()\n      }\n    });\n  }\n}\n\nreturn results.length > 0 ? results : [{ json: { message: 'Aucun résultat pertinent' } }];"
+      },
+      "id": "code-scoring",
+      "name": "Extraction + Scoring",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-score",
+              "leftValue": "={{ $json.score }}",
+              "rightValue": 0.7,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-score",
+      "name": "Score > 0.7",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [1090, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "schema": "public"
+        },
+        "table": {
+          "table": "opportunites"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "titre": "={{ $json.titre }}",
+            "prix_achat": "={{ $json.prix }}",
+            "url_source": "={{ $json.url }}",
+            "score": "={{ $json.score }}",
+            "marques_detectees": "={{ { marque: $json.marque_detectee } }}",
+            "facteurs": "={{ { roi_estime: $json.roi_estime, multiplicateur: $json.multiplicateur, valeur_estimee: $json.valeur_estimee } }}",
+            "statut": "DETECTE"
+          }
+        },
+        "options": {}
+      },
+      "id": "postgres-insert",
+      "name": "Sauvegarder en DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1300, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credentials",
+          "name": "PostgreSQL Outillage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=🔥 *Opportunité détectée !*\n\n*{{ $json.titre }}*\n\n💰 Prix : {{ $json.prix }}€\n📊 Score : {{ Math.round($json.score * 100) }}%\n🏷️ Marque : {{ $json.marque_detectee || 'Non détectée' }}\n📈 ROI estimé : {{ Math.round($json.roi_estime * 100) }}%\n💵 Valeur estimée : {{ $json.valeur_estimee }}€\n\n🔗 [Voir l'annonce]({{ $json.url }})",
+        "additionalFields": {
+          "parseMode": "Markdown"
+        }
+      },
+      "id": "telegram-alert",
+      "name": "Alerte Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1300, 480],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot-credentials",
+          "name": "Telegram Bot FlipFinder"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Toutes les 30min": {
+      "main": [
+        [
+          {
+            "node": "Mots-clés Premium",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mots-clés Premium": {
+      "main": [
+        [
+          {
+            "node": "Scan Interenchères",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scan Interenchères": {
+      "main": [
+        [
+          {
+            "node": "Extraction + Scoring",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extraction + Scoring": {
+      "main": [
+        [
+          {
+            "node": "Score > 0.7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score > 0.7": {
+      "main": [
+        [
+          {
+            "node": "Sauvegarder en DB",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Alerte Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2024-10-31T00:00:00.000Z",
+  "versionId": "1"
+}

@@ -1,0 +1,233 @@
+{
+  "name": "Analyse Détaillée - Opportunité",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "analyse-opportunite",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Analyse",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "analyse-opportunite"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM opportunites WHERE id = {{ $json.body.opportunite_id }}",
+        "options": {}
+      },
+      "id": "postgres-get-opportunite",
+      "name": "Récupérer Opportunité",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credentials",
+          "name": "PostgreSQL Outillage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url_source }}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": true
+            }
+          }
+        }
+      },
+      "id": "http-detail-page",
+      "name": "Fetch Page Détail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [670, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyse détaillée avec extraction d'informations supplémentaires\nconst html = $input.first().json.body;\nconst opportunite = $input.all()[0].json;\n\n// Extraction des images\nconst imageRegex = /<img[^>]+src=\"([^\"]+)\"/gi;\nconst images = [];\nlet imgMatch;\n\nwhile ((imgMatch = imageRegex.exec(html)) !== null) {\n  if (imgMatch[1].includes('photo') || imgMatch[1].includes('image')) {\n    images.push(imgMatch[1]);\n  }\n}\n\n// Extraction description\nconst descRegex = /<div class=\"description\"[^>]*>([\\s\\S]*?)<\\/div>/i;\nconst descMatch = descRegex.exec(html);\nconst description = descMatch ? descMatch[1].replace(/<[^>]+>/g, '').trim() : '';\n\n// Extraction date fin enchère\nconst dateRegex = /(\\d{2})\\/(\\d{2})\\/(\\d{4})[^\\d]*(\\d{2}):(\\d{2})/;\nconst dateMatch = dateRegex.exec(html);\nconst date_fin_enchere = dateMatch \n  ? new Date(`${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}T${dateMatch[4]}:${dateMatch[5]}:00`).toISOString()\n  : null;\n\n// Détection modèle spécifique\nconst modeles = {\n  hilti: /TE\\s*(\\d+)|DD\\s*(\\d+)|SF\\s*(\\d+)/i,\n  festool: /TS\\s*(\\d+)|OF\\s*(\\d+)|CTL\\s*(\\d+)/i,\n  milwaukee: /M(\\d{2})[A-Z]*/i,\n  makita: /D[A-Z]{2}\\s*(\\d{3})/i,\n  dewalt: /DC[A-Z]\\s*(\\d{3})/i\n};\n\nlet modele_detecte = null;\nconst marque = opportunite.marques_detectees?.marque;\n\nif (marque && modeles[marque.toLowerCase()]) {\n  const modeleMatch = modeles[marque.toLowerCase()].exec(description + ' ' + opportunite.titre);\n  if (modeleMatch) {\n    modele_detecte = modeleMatch[0];\n  }\n}\n\n// Estimation prix marché (à améliorer avec API externe)\nconst prix_marche_estime = opportunite.prix * (opportunite.facteurs?.multiplicateur || 2);\n\n// Scoring détaillé\nlet score_final = opportunite.score || 0;\n\n// Bonus si images présentes\nif (images.length > 3) score_final += 0.05;\nif (images.length > 5) score_final += 0.05;\n\n// Bonus si description détaillée\nif (description.length > 200) score_final += 0.05;\n\n// Bonus si modèle détecté\nif (modele_detecte) score_final += 0.1;\n\n// Malus si peu d'infos\nif (description.length < 50) score_final -= 0.1;\nif (images.length < 2) score_final -= 0.1;\n\nreturn [{\n  json: {\n    opportunite_id: opportunite.id,\n    images: images.slice(0, 10),\n    description,\n    date_fin_enchere,\n    modele_detecte,\n    prix_marche_estime,\n    score_final: Math.max(0, Math.min(1, score_final)),\n    analyse_complete: true,\n    recommandation: score_final > 0.75 ? 'ACHAT_PRIORITAIRE' : score_final > 0.6 ? 'ACHAT_SURVEILLER' : 'PASSER'\n  }\n}];"
+      },
+      "id": "code-analyse",
+      "name": "Analyse IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300]
+    },
+    {
+      "parameters": {
+        "model": "mistral:latest",
+        "prompt": "=Analyse cette opportunité d'arbitrage d'outillage professionnel et donne ton avis :\n\nTitre : {{ $json.titre }}\nPrix : {{ $json.prix }}€\nMarque : {{ $json.marque_detectee }}\nModèle : {{ $json.modele_detecte || 'Non détecté' }}\nDescription : {{ $json.description }}\n\nÉvalue :\n1. Authenticité (vraie marque pro ou contrefaçon ?)\n2. État probable (neuf, occasion, défectueux)\n3. Valeur marché réelle\n4. Risques potentiels\n5. Recommandation achat (OUI/NON/SURVEILLER)\n\nRéponds en JSON format :\n{\n  \"authenticite_score\": 0-100,\n  \"etat_probable\": \"neuf|occasion|defectueux\",\n  \"valeur_marche\": prix_en_euros,\n  \"risques\": [\"risque1\", \"risque2\"],\n  \"recommandation\": \"OUI|NON|SURVEILLER\",\n  \"justification\": \"explication courte\"\n}",
+        "options": {}
+      },
+      "id": "ollama-ai",
+      "name": "Ollama IA Analysis",
+      "type": "n8n-nodes-base.ollama",
+      "typeVersion": 1,
+      "position": [1090, 300],
+      "credentials": {
+        "ollamaApi": {
+          "id": "ollama-credentials",
+          "name": "Ollama Local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Fusion des données analyse + IA\nconst analyse = $input.all()[0].json;\nconst ia_result = $input.first().json.response;\n\nlet ia_data = {};\ntry {\n  ia_data = JSON.parse(ia_result);\n} catch (e) {\n  ia_data = { error: 'Parse failed' };\n}\n\nreturn [{\n  json: {\n    ...analyse,\n    ia_authenticite: ia_data.authenticite_score,\n    ia_etat: ia_data.etat_probable,\n    ia_valeur_marche: ia_data.valeur_marche,\n    ia_risques: ia_data.risques,\n    ia_recommandation: ia_data.recommandation,\n    ia_justification: ia_data.justification\n  }\n}];"
+      },
+      "id": "code-merge",
+      "name": "Fusion Données",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": {
+          "schema": "public"
+        },
+        "table": {
+          "table": "opportunites"
+        },
+        "updateKey": {
+          "updateKey": "id",
+          "value": "={{ $json.opportunite_id }}"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "description": "={{ $json.description }}",
+            "images_urls": "={{ $json.images }}",
+            "date_fin_enchere": "={{ $json.date_fin_enchere }}",
+            "score": "={{ $json.score_final }}",
+            "marques_detectees": "={{ { marque: $json.marque_detectee, modele: $json.modele_detecte } }}",
+            "facteurs": "={{ { \n              prix_marche_estime: $json.prix_marche_estime,\n              ia_authenticite: $json.ia_authenticite,\n              ia_valeur_marche: $json.ia_valeur_marche,\n              ia_risques: $json.ia_risques \n            } }}",
+            "statut": "={{ $json.recommandation }}",
+            "analyse_ia": "={{ $json.ia_justification }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "postgres-update",
+      "name": "Update DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1510, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credentials",
+          "name": "PostgreSQL Outillage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=✅ *Analyse complète terminée*\n\n{{ $json.titre }}\n\n🤖 *Recommandation IA* : {{ $json.ia_recommandation }}\n📊 Authenticité : {{ $json.ia_authenticite }}%\n📦 État : {{ $json.ia_etat }}\n💵 Valeur marché : {{ $json.ia_valeur_marche }}€\n\n⚠️ *Risques* :\n{{ $json.ia_risques?.join('\\n• ') || 'Aucun' }}\n\n💡 {{ $json.ia_justification }}",
+        "additionalFields": {
+          "parseMode": "Markdown"
+        }
+      },
+      "id": "telegram-result",
+      "name": "Résultat Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1510, 480],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot-credentials",
+          "name": "Telegram Bot FlipFinder"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Analyse": {
+      "main": [
+        [
+          {
+            "node": "Récupérer Opportunité",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Récupérer Opportunité": {
+      "main": [
+        [
+          {
+            "node": "Fetch Page Détail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Page Détail": {
+      "main": [
+        [
+          {
+            "node": "Analyse IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyse IA": {
+      "main": [
+        [
+          {
+            "node": "Ollama IA Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama IA Analysis": {
+      "main": [
+        [
+          {
+            "node": "Fusion Données",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fusion Données": {
+      "main": [
+        [
+          {
+            "node": "Update DB",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Résultat Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2024-10-31T00:00:00.000Z",
+  "versionId": "1"
+}

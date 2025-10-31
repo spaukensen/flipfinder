@@ -1,0 +1,104 @@
+version: '3.8'
+networks:
+  outillage-net:
+    driver: bridge
+services:
+  postgres:
+    image: 'postgres:15-alpine'
+    container_name: outillage_postgres
+    restart: unless-stopped
+    networks:
+      - outillage-net
+    environment:
+      - POSTGRES_DB=outillage
+      - POSTGRES_USER=outillage_user
+      - 'POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-SecurePass2024}'
+      - POSTGRES_INITDB_ARGS=--encoding=UTF8
+    volumes:
+      - 'postgres_data:/var/lib/postgresql/data'
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'pg_isready -U outillage_user -d outillage'
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  n8n:
+    image: 'n8nio/n8n:latest'
+    container_name: outillage_n8n
+    restart: unless-stopped
+    networks:
+      - outillage-net
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - 'WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678}'
+      - 'N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-changeThisToARandomString}'
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=outillage
+      - DB_POSTGRESDB_USER=outillage_user
+      - 'DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD:-SecurePass2024}'
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=168
+      - GENERIC_TIMEZONE=Europe/Paris
+    volumes:
+      - 'n8n_data:/home/node/.n8n'
+    ports:
+      - '5678:5678'
+    depends_on:
+      - postgres
+  ollama:
+    image: 'ollama/ollama:latest'
+    container_name: outillage_ollama
+    restart: unless-stopped
+    networks:
+      - outillage-net
+    volumes:
+      - 'ollama_models:/root/.ollama'
+    ports:
+      - '11434:11434'
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+  meilisearch:
+    image: 'getmeili/meilisearch:v1.6'
+    container_name: outillage_meilisearch
+    restart: unless-stopped
+    networks:
+      - outillage-net
+    environment:
+      - 'MEILI_MASTER_KEY=${MEILI_MASTER_KEY:-MasterKey2024}'
+      - MEILI_ENV=production
+    volumes:
+      - 'meilisearch_data:/meili_data'
+    ports:
+      - '7700:7700'
+  browserless:
+    image: 'browserless/chrome:latest'
+    container_name: outillage_browser
+    restart: unless-stopped
+    networks:
+      - outillage-net
+    environment:
+      - CONNECTION_TIMEOUT=120000
+      - MAX_CONCURRENT_SESSIONS=2
+      - MAX_QUEUE_LENGTH=10
+      - ENABLE_CORS=true
+      - 'TOKEN=${BROWSERLESS_TOKEN:-token123}'
+    ports:
+      - '3300:3000'
+volumes:
+  postgres_data:
+    driver: local
+  n8n_data:
+    driver: local
+  ollama_models:
+    driver: local
+  meilisearch_data:
+    driver: local

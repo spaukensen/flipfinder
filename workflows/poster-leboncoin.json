@@ -1,0 +1,225 @@
+{
+  "name": "Poster LeBonCoin - Auto",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "poster-leboncoin",
+        "options": {}
+      },
+      "id": "webhook-poster",
+      "name": "Webhook Poster",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "poster-leboncoin"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM opportunites WHERE id = {{ $json.body.opportunite_id }} AND statut = 'ACHAT_PRIORITAIRE'",
+        "options": {}
+      },
+      "id": "postgres-get-item",
+      "name": "Récupérer Article",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [460, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credentials",
+          "name": "PostgreSQL Outillage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Génération du titre optimisé pour LeBonCoin\nconst item = $input.first().json;\nconst marque = item.marques_detectees?.marque || '';\nconst modele = item.marques_detectees?.modele || '';\n\n// Extraction état depuis description\nlet etat = 'Occasion';\nif (item.description?.toLowerCase().includes('neuf')) etat = 'Neuf';\nif (item.description?.toLowerCase().includes('défectueux')) etat = 'Pour pièces';\n\n// Template titre (max 80 caractères)\nconst titre_lbc = `${marque.toUpperCase()} ${modele} - ${etat} - Pro`\n  .substring(0, 80);\n\n// Template description optimisée SEO\nconst description_lbc = `🔧 ${marque.toUpperCase()} ${modele} - Outillage Professionnel\n\n✅ État : ${etat}\n${item.description ? `\\n📝 Description :\\n${item.description}\\n` : ''}\n💼 Matériel professionnel de qualité\n📦 Envoi rapide possible\n💬 N'hésitez pas à me contacter pour plus d'infos\n\n#${marque} #outillage #pro #bricolage`;\n\n// Calcul prix de vente (marge 150-200%)\nconst prix_achat = item.prix_achat || 0;\nconst ia_valeur = item.facteurs?.ia_valeur_marche || 0;\nconst prix_marche = Math.max(ia_valeur, prix_achat * 2.5);\n\n// Prix légèrement en dessous du marché pour vente rapide\nconst prix_vente = Math.round(prix_marche * 0.9);\n\n// Catégorie LeBonCoin\nconst categorie = 'outillage_materiaux_2eme_oeuvre';\n\nreturn [{\n  json: {\n    opportunite_id: item.id,\n    titre_lbc,\n    description_lbc,\n    prix_vente,\n    categorie,\n    images: item.images_urls || [],\n    marque,\n    modele,\n    etat,\n    localisation: 'Paris', // À personnaliser\n    livraison: true\n  }\n}];"
+      },
+      "id": "code-template",
+      "name": "Template LeBonCoin",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [670, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.leboncoin.fr/api/ads/v1/",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "subject",
+              "value": "={{ $json.titre_lbc }}"
+            },
+            {
+              "name": "body",
+              "value": "={{ $json.description_lbc }}"
+            },
+            {
+              "name": "category",
+              "value": "={{ $json.categorie }}"
+            },
+            {
+              "name": "price",
+              "value": "={{ $json.prix_vente }}"
+            },
+            {
+              "name": "location",
+              "value": "={{ { city: $json.localisation } }}"
+            },
+            {
+              "name": "images",
+              "value": "={{ $json.images }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-leboncoin-api",
+      "name": "API LeBonCoin",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [880, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "leboncoin-api-credentials",
+          "name": "LeBonCoin API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": {
+          "schema": "public"
+        },
+        "table": {
+          "table": "opportunites"
+        },
+        "updateKey": {
+          "updateKey": "id",
+          "value": "={{ $json.opportunite_id }}"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "prix_vente": "={{ $json.prix_vente }}",
+            "url_vente": "={{ $json.ad_url }}",
+            "statut": "EN_VENTE",
+            "date_mise_vente": "={{ new Date().toISOString() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "postgres-update-vente",
+      "name": "Update Statut",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1090, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credentials",
+          "name": "PostgreSQL Outillage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=📣 *Annonce publiée sur LeBonCoin !*\n\n{{ $json.titre_lbc }}\n\n💰 Prix de vente : {{ $json.prix_vente }}€\n🛒 Prix d'achat : {{ $json.prix_achat }}€\n📊 Marge : {{ Math.round(($json.prix_vente / $json.prix_achat - 1) * 100) }}%\n\n🔗 [Voir l'annonce]({{ $json.ad_url }})",
+        "additionalFields": {
+          "parseMode": "Markdown"
+        }
+      },
+      "id": "telegram-success",
+      "name": "Notification Vente",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1300, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot-credentials",
+          "name": "Telegram Bot FlipFinder"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Poster": {
+      "main": [
+        [
+          {
+            "node": "Récupérer Article",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Récupérer Article": {
+      "main": [
+        [
+          {
+            "node": "Template LeBonCoin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Template LeBonCoin": {
+      "main": [
+        [
+          {
+            "node": "API LeBonCoin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API LeBonCoin": {
+      "main": [
+        [
+          {
+            "node": "Update Statut",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Statut": {
+      "main": [
+        [
+          {
+            "node": "Notification Vente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2024-10-31T00:00:00.000Z",
+  "versionId": "1"
+}
