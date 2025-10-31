@@ -130,23 +130,27 @@
     },
     {
       "parameters": {
-        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
-        "text": "=✅ *Analyse complète terminée*\n\n{{ $json.titre }}\n\n🤖 *Recommandation IA* : {{ $json.ia_recommandation }}\n📊 Authenticité : {{ $json.ia_authenticite }}%\n📦 État : {{ $json.ia_etat }}\n💵 Valeur marché : {{ $json.ia_valeur_marche }}€\n\n⚠️ *Risques* :\n{{ $json.ia_risques?.join('\\n• ') || 'Aucun' }}\n\n💡 {{ $json.ia_justification }}",
-        "additionalFields": {
-          "parseMode": "Markdown"
-        }
+        "method": "POST",
+        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"embeds\": [{\n    \"title\": \"✅ Analyse complète terminée\",\n    \"description\": $json.titre,\n    \"color\": 5763719,\n    \"fields\": [\n      { \"name\": \"🤖 Recommandation IA\", \"value\": $json.ia_recommandation, \"inline\": false },\n      { \"name\": \"📊 Authenticité\", \"value\": $json.ia_authenticite + \"%\", \"inline\": true },\n      { \"name\": \"📦 État\", \"value\": $json.ia_etat, \"inline\": true },\n      { \"name\": \"💵 Valeur marché\", \"value\": $json.ia_valeur_marche + \"€\", \"inline\": true },\n      { \"name\": \"⚠️ Risques\", \"value\": ($json.ia_risques?.join('\\n• ') || 'Aucun'), \"inline\": false },\n      { \"name\": \"💡 Justification\", \"value\": $json.ia_justification, \"inline\": false }\n    ],\n    \"timestamp\": new Date().toISOString()\n  }]\n} }}",
+        "options": {}
       },
-      "id": "telegram-result",
-      "name": "Résultat Telegram",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1.1,
-      "position": [1510, 480],
-      "credentials": {
-        "telegramApi": {
-          "id": "telegram-bot-credentials",
-          "name": "Telegram Bot FlipFinder"
-        }
-      }
+      "id": "discord-result",
+      "name": "Résultat Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1510, 480]
     }
   ],
   "connections": {
@@ -214,7 +218,7 @@
             "index": 0
           },
           {
-            "node": "Résultat Telegram",
+            "node": "Résultat Discord",
             "type": "main",
             "index": 0
           }

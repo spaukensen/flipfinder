@@ -122,23 +122,27 @@
     },
     {
       "parameters": {
-        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
-        "text": "=🔥 *Opportunité détectée !*\n\n*{{ $json.titre }}*\n\n💰 Prix : {{ $json.prix }}€\n📊 Score : {{ Math.round($json.score * 100) }}%\n🏷️ Marque : {{ $json.marque_detectee || 'Non détectée' }}\n📈 ROI estimé : {{ Math.round($json.roi_estime * 100) }}%\n💵 Valeur estimée : {{ $json.valeur_estimee }}€\n\n🔗 [Voir l'annonce]({{ $json.url }})",
-        "additionalFields": {
-          "parseMode": "Markdown"
-        }
+        "method": "POST",
+        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"embeds\": [{\n    \"title\": \"🔥 Opportunité détectée !\",\n    \"description\": $json.titre,\n    \"color\": 16737792,\n    \"fields\": [\n      { \"name\": \"💰 Prix\", \"value\": $json.prix + \"€\", \"inline\": true },\n      { \"name\": \"📊 Score\", \"value\": Math.round($json.score * 100) + \"%\", \"inline\": true },\n      { \"name\": \"🏷️ Marque\", \"value\": $json.marque_detectee || \"Non détectée\", \"inline\": true },\n      { \"name\": \"📈 ROI estimé\", \"value\": Math.round($json.roi_estime * 100) + \"%\", \"inline\": true },\n      { \"name\": \"💵 Valeur estimée\", \"value\": $json.valeur_estimee + \"€\", \"inline\": true }\n    ],\n    \"url\": $json.url,\n    \"timestamp\": new Date().toISOString()\n  }]\n} }}",
+        "options": {}
       },
-      "id": "telegram-alert",
-      "name": "Alerte Telegram",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1.1,
-      "position": [1300, 480],
-      "credentials": {
-        "telegramApi": {
-          "id": "telegram-bot-credentials",
-          "name": "Telegram Bot FlipFinder"
-        }
-      }
+      "id": "discord-alert",
+      "name": "Alerte Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1300, 480]
     }
   ],
   "connections": {
@@ -195,7 +199,7 @@
             "index": 0
           },
           {
-            "node": "Alerte Telegram",
+            "node": "Alerte Discord",
             "type": "main",
             "index": 0
           }
