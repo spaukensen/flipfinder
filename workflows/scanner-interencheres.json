@@ -20,18 +20,26 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "https://www.interencheres.com/recherche/?keyword={{ $json.keyword }}&cat=14",
-        "options": {
-          "redirect": {
-            "redirect": {
-              "followRedirects": true
+        "method": "POST",
+        "url": "=http://browserless:3000/content?token={{ $env.BROWSERLESS_TOKEN }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
             }
-          }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"url\": \"https://www.interencheres.com/recherche/?keyword=\" + encodeURIComponent($json.keyword) + \"&cat=14\",\n  \"gotoOptions\": {\n    \"waitUntil\": \"domcontentloaded\",\n    \"timeout\": 60000\n  },\n  \"waitFor\": 5000\n} }}",
+        "options": {
+          "timeout": 90000
         }
       },
       "id": "http-request-interencheres",
-      "name": "Scan Interenchères",
+      "name": "Scan Interenchères (Browserless)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [670, 300]

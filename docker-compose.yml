@@ -48,6 +48,8 @@ services:
       - EXECUTIONS_DATA_PRUNE=true
       - EXECUTIONS_DATA_MAX_AGE=168
       - GENERIC_TIMEZONE=Europe/Paris
+      - 'BROWSERLESS_TOKEN=${BROWSERLESS_TOKEN:-token123}'
+      - 'DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}'
     volumes:
       - 'n8n_data:/home/node/.n8n'
     ports:
