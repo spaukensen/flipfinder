@@ -142,9 +142,7 @@ services:
       start_period: 30s
 
   playwright-stealth:
-    build:
-      context: .
-      dockerfile: Dockerfile.playwright-stealth
+    build: ./playwright-stealth
     container_name: outillage_playwright
     restart: unless-stopped
     networks:
