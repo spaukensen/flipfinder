@@ -1,0 +1,147 @@
+version: '3.8'
+
+networks:
+  outillage-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  n8n_data:
+    driver: local
+
+services:
+  postgres:
+    image: 'postgres:15-alpine'
+    container_name: outillage_postgres
+    restart: unless-stopped
+    networks:
+      - outillage-net
+    environment:
+      - 'POSTGRES_USER=${POSTGRES_USER:-outillage_user}'
+      - 'POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-SecurePass2024!}'
+      - 'POSTGRES_DB=${POSTGRES_DB:-outillage}'
+    volumes:
+      - 'postgres_data:/var/lib/postgresql/data'
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'pg_isready -U ${POSTGRES_USER:-outillage_user} -d ${POSTGRES_DB:-outillage}'
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  n8n:
+    image: 'n8nio/n8n:latest'
+    container_name: outillage_n8n
+    restart: unless-stopped
+    networks:
+      - outillage-net
+    environment:
+      - 'N8N_HOST=${SERVICE_FQDN_N8N:-localhost}'
+      - 'N8N_PORT=5678'
+      - 'N8N_PROTOCOL=https'
+      - 'WEBHOOK_URL=https://${SERVICE_FQDN_N8N:-localhost}/'
+      - 'N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}'
+      - 'DB_TYPE=postgresdb'
+      - 'DB_POSTGRESDB_HOST=postgres'
+      - 'DB_POSTGRESDB_PORT=5432'
+      - 'DB_POSTGRESDB_DATABASE=${POSTGRES_DB:-outillage}'
+      - 'DB_POSTGRESDB_USER=${POSTGRES_USER:-outillage_user}'
+      - 'DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD:-SecurePass2024!}'
+      - 'N8N_SECURE_COOKIE=true'
+      - 'N8N_PROXY_HOPS=1'
+      - 'DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}'
+      - 'N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true'
+    volumes:
+      - 'n8n_data:/home/node/.n8n'
+    ports:
+      - '5678:5678'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'wget --spider -q http://localhost:5678/healthz || exit 1'
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+
+  # Service Playwright Stealth avec installation manuelle
+  playwright-stealth:
+    image: 'mcr.microsoft.com/playwright:v1.40.0-focal'
+    container_name: outillage_playwright
+    restart: unless-stopped
+    networks:
+      - outillage-net
+    working_dir: /app
+    command: >
+      sh -c "
+      echo 'Installing dependencies...' &&
+      npm install express@^4.18.2 playwright@^1.40.0 playwright-extra@^4.3.6 puppeteer-extra-plugin-stealth@^2.11.2 &&
+      echo 'Starting server...' &&
+      node -e \"
+      const express = require('express');
+      const { chromium } = require('playwright-extra');
+      const stealth = require('puppeteer-extra-plugin-stealth')();
+      chromium.use(stealth);
+      const app = express();
+      app.use(express.json());
+      let browser = null;
+      async function getBrowser() {
+        if (!browser || !browser.isConnected()) {
+          browser = await chromium.launch({
+            headless: true,
+            args: ['--disable-blink-features=AutomationControlled', '--disable-dev-shm-usage', '--no-sandbox']
+          });
+        }
+        return browser;
+      }
+      app.post('/scrape', async (req, res) => {
+        const { url, waitFor = 3000 } = req.body;
+        if (!url) return res.status(400).json({ error: 'URL required' });
+        let page = null;
+        try {
+          const browser = await getBrowser();
+          const context = await browser.newContext({
+            viewport: { width: 1920, height: 1080 },
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0',
+            locale: 'fr-FR',
+            timezoneId: 'Europe/Paris'
+          });
+          page = await context.newPage();
+          await page.addInitScript(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window.chrome = { runtime: {} };
+          });
+          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+          await page.waitForTimeout(waitFor);
+          const html = await page.content();
+          await context.close();
+          res.json({ success: true, html, url: page.url(), cloudflareDetected: html.includes('challenge-platform') });
+        } catch (error) {
+          if (page) await page.close().catch(() => {});
+          res.status(500).json({ success: false, error: error.message });
+        }
+      });
+      app.get('/health', (req, res) => res.json({ status: 'ok', browserConnected: browser?.isConnected() || false }));
+      app.listen(3001, () => console.log('Playwright API on port 3001'));
+      \"
+      "
+    ports:
+      - '3001:3001'
+    environment:
+      - NODE_ENV=production
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'curl -f http://localhost:3001/health || exit 1'
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s

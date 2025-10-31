@@ -1,0 +1,34 @@
+# Coolify Configuration
+# https://coolify.io/docs/resources/docker-compose
+
+version: "1.0"
+
+# Docker Compose file to use
+compose_file: docker-compose.coolify.yml
+
+# Build configuration
+build:
+  dockerfile: Dockerfile.playwright-stealth
+  context: .
+
+# Environment variables
+env:
+  SERVICE_FQDN_N8N: "flipfinder.ara-solutions.cloud"
+  N8N_ENCRYPTION_KEY: "CHANGE_ME_32_CHARACTERS_MINIMUM"
+  POSTGRES_USER: "outillage_user"
+  POSTGRES_PASSWORD: "CHANGE_ME_SECURE_PASSWORD"
+  POSTGRES_DB: "outillage"
+  BROWSERLESS_TOKEN: "token123"
+  DISCORD_WEBHOOK_URL: "CHANGE_ME_DISCORD_WEBHOOK"
+  MEILI_MASTER_KEY: "CHANGE_ME_MEILI_KEY"
+
+# Health checks
+healthcheck:
+  enabled: true
+  interval: 30s
+  timeout: 10s
+  retries: 3
+
+# Auto-deploy on git push
+auto_deploy: true
+branch: main

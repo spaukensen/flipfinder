@@ -1,7 +1,19 @@
 version: '3.8'
+
 networks:
   outillage-net:
     driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  n8n_data:
+    driver: local
+  ollama_data:
+    driver: local
+  meilisearch_data:
+    driver: local
+
 services:
   postgres:
     image: 'postgres:15-alpine'
@@ -10,10 +22,9 @@ services:
     networks:
       - outillage-net
     environment:
-      - POSTGRES_DB=outillage
-      - POSTGRES_USER=outillage_user
-      - 'POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-SecurePass2024}'
-      - POSTGRES_INITDB_ARGS=--encoding=UTF8
+      - 'POSTGRES_USER=${POSTGRES_USER:-outillage_user}'
+      - 'POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-SecurePass2024!}'
+      - 'POSTGRES_DB=${POSTGRES_DB:-outillage}'
     volumes:
       - 'postgres_data:/var/lib/postgresql/data'
     ports:
@@ -21,10 +32,12 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - 'pg_isready -U outillage_user -d outillage'
+        - 'pg_isready -U ${POSTGRES_USER:-outillage_user} -d ${POSTGRES_DB:-outillage}'
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
+
   n8n:
     image: 'n8nio/n8n:latest'
     container_name: outillage_n8n
@@ -32,24 +45,22 @@ services:
     networks:
       - outillage-net
     environment:
-      - N8N_HOST=0.0.0.0
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - NODE_ENV=production
-      - 'WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678}'
-      - 'N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-changeThisToARandomString}'
-      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
-      - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=postgres
-      - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=outillage
-      - DB_POSTGRESDB_USER=outillage_user
-      - 'DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD:-SecurePass2024}'
-      - EXECUTIONS_DATA_PRUNE=true
-      - EXECUTIONS_DATA_MAX_AGE=168
-      - GENERIC_TIMEZONE=Europe/Paris
+      - 'N8N_HOST=${SERVICE_FQDN_N8N:-localhost}'
+      - 'N8N_PORT=5678'
+      - 'N8N_PROTOCOL=https'
+      - 'WEBHOOK_URL=https://${SERVICE_FQDN_N8N:-localhost}/'
+      - 'N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}'
+      - 'DB_TYPE=postgresdb'
+      - 'DB_POSTGRESDB_HOST=postgres'
+      - 'DB_POSTGRESDB_PORT=5432'
+      - 'DB_POSTGRESDB_DATABASE=${POSTGRES_DB:-outillage}'
+      - 'DB_POSTGRESDB_USER=${POSTGRES_USER:-outillage_user}'
+      - 'DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD:-SecurePass2024!}'
+      - 'N8N_SECURE_COOKIE=true'
+      - 'N8N_PROXY_HOPS=1'
       - 'BROWSERLESS_TOKEN=${BROWSERLESS_TOKEN:-token123}'
       - 'DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}'
+      - 'N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true'
     volumes:
       - 'n8n_data:/home/node/.n8n'
     ports:
@@ -60,11 +71,12 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - 'wget --no-verbose --tries=1 --spider http://localhost:5678/healthz || exit 1'
+        - 'wget --spider -q http://localhost:5678/healthz || exit 1'
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 45s
+
   ollama:
     image: 'ollama/ollama:latest'
     container_name: outillage_ollama
@@ -72,11 +84,9 @@ services:
     networks:
       - outillage-net
     volumes:
-      - 'ollama_models:/root/.ollama'
+      - 'ollama_data:/root/.ollama'
     ports:
       - '11434:11434'
-    environment:
-      - OLLAMA_HOST=0.0.0.0
     healthcheck:
       test:
         - CMD-SHELL
@@ -84,16 +94,17 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 60s
+
   meilisearch:
-    image: 'getmeili/meilisearch:v1.6'
+    image: 'getmeili/meilisearch:latest'
     container_name: outillage_meilisearch
     restart: unless-stopped
     networks:
       - outillage-net
     environment:
-      - 'MEILI_MASTER_KEY=${MEILI_MASTER_KEY:-MasterKey2024}'
-      - MEILI_ENV=production
+      - 'MEILI_MASTER_KEY=${MEILI_MASTER_KEY:-masterKey123}'
+      - 'MEILI_ENV=production'
     volumes:
       - 'meilisearch_data:/meili_data'
     ports:
@@ -106,6 +117,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
   browserless:
     image: 'browserless/chrome:latest'
     container_name: outillage_browser
@@ -128,8 +140,11 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+
   playwright-stealth:
-    build: ./playwright-stealth
+    build:
+      context: .
+      dockerfile: Dockerfile.playwright-stealth
     container_name: outillage_playwright
     restart: unless-stopped
     networks:
@@ -146,12 +161,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 45s
-volumes:
-  postgres_data:
-    driver: local
-  n8n_data:
-    driver: local
-  ollama_models:
-    driver: local
-  meilisearch_data:
-    driver: local

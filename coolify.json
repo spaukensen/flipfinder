@@ -1,0 +1,14 @@
+{
+  "name": "FlipFinder Outillage",
+  "type": "docker-compose",
+  "dockerComposeFile": "docker-compose.coolify.yml",
+  "environment": {
+    "SERVICE_FQDN_N8N": "flipfinder.ara-solutions.cloud",
+    "N8N_ENCRYPTION_KEY": "CHANGE_ME_32_CHARS_MINIMUM",
+    "POSTGRES_USER": "outillage_user",
+    "POSTGRES_PASSWORD": "CHANGE_ME_SECURE_PASSWORD",
+    "POSTGRES_DB": "outillage",
+    "DISCORD_WEBHOOK_URL": "CHANGE_ME_WEBHOOK_URL",
+    "BROWSERLESS_TOKEN": "token123"
+  }
+}

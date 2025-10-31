@@ -1,0 +1,11 @@
+# Disable Nixpacks auto-detection
+# Force Coolify to use Docker Compose
+
+[phases.setup]
+nixPkgs = []
+
+[phases.build]
+cmds = ["echo 'Using Docker Compose instead of Nixpacks'"]
+
+[start]
+cmd = "echo 'This project uses docker-compose.yml'"
