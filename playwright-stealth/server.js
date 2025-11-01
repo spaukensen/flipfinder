@@ -120,7 +120,44 @@ app.post('/scrape', async (req, res) => {
     await page.mouse.move(200, 200);
     await page.waitForTimeout(500);
 
-    // Get final HTML
+    // INTERENCHERES SPECIFIC: Wait for Vue.js to hydrate and load lots
+    console.log('Waiting for Vue.js to load lots...');
+
+    try {
+      // Strategy 1: Wait for network idle (all XHR/Fetch completed)
+      await page.waitForLoadState('networkidle', { timeout: 15000 });
+      console.log('Network idle reached');
+
+      // Strategy 2: Wait for specific Vue.js elements to appear
+      // Try multiple possible selectors for lot items
+      const selectors = [
+        '[data-lot]',
+        '.v-card[href*="/lot"]',
+        'a[href*="/lot/"]',
+        '.autoqa-lot',
+        '[class*="lot-item"]',
+        '[class*="search-result"]'
+      ];
+
+      for (const selector of selectors) {
+        try {
+          await page.waitForSelector(selector, { timeout: 5000 });
+          console.log(`Found lots with selector: ${selector}`);
+          break;
+        } catch (e) {
+          console.log(`Selector ${selector} not found, trying next...`);
+        }
+      }
+
+      // Additional wait for Vue.js to finish rendering
+      await page.waitForTimeout(2000);
+
+    } catch (error) {
+      console.log('Timeout waiting for lots, continuing anyway:', error.message);
+      // Continue even if timeout - maybe lots are already loaded
+    }
+
+    // Get final HTML after Vue.js hydration
     const html = await page.content();
     const url_final = page.url();
 

@@ -1,0 +1,222 @@
+{
+  "name": "Extract Lots Interencheres",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "name": "Cron - Every 30min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://www.interencheres.com/recherche/?keyword={{$json.keyword}}&cat=14",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "name": "HTTP Request - Interencheres",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// =============================================\n// EXTRACTION LOTS INTERENCHERES - N8N CODE NODE\n// =============================================\n\nconst cheerio = require('cheerio');\n\n// Récupérer le HTML\nconst html = $input.first().json.body || $input.first().json.html || '';\n\nif (!html || html.length < 1000) {\n  return [{\n    json: {\n      error: 'HTML trop court ou vide',\n      length: html.length\n    }\n  }];\n}\n\nconst $ = cheerio.load(html);\nconst lots = [];\n\n// ========================================\n// SÉLECTEURS CSS (À AJUSTER SELON ANALYSE)\n// ========================================\n\nconst selectors = [\n  // Vuetify cards\n  '.v-card.lot-card',\n  '.v-card[data-lot-id]',\n  \n  // AutoQA classes\n  '.autoqa-lot',\n  '.autoqa-result-item',\n  '.autoqa-lot-card',\n  \n  // Generic\n  'article.lot',\n  '.search-results .lot-item',\n  '[class*=\"lot-\"]',\n  \n  // Fallback: links\n  'a[href*=\"/lot/\"]'\n];\n\n// Tester chaque sélecteur\nfor (const selector of selectors) {\n  const elements = $(selector);\n  \n  if (elements.length > 0) {\n    console.log(`✓ Trouvé ${elements.length} éléments avec: ${selector}`);\n    \n    elements.each((index, element) => {\n      const $el = $(element);\n      \n      // Extraction du titre\n      const titre = $el.find('h1, h2, h3, h4, .title, [class*=\"title\"]').first().text().trim()\n        || $el.find('a').first().text().trim()\n        || '';\n      \n      // Extraction du prix\n      const prixText = $el.find('.price, .lot-price, [class*=\"price\"], .amount').first().text().trim()\n        || $el.text().match(/\\d+\\s*€/)?.[0]\n        || '';\n      \n      const prix = prixText.replace(/[^\\d,]/g, '').replace(',', '.');\n      \n      // Extraction de l'URL\n      let url = $el.find('a').first().attr('href') || $el.attr('href') || '';\n      if (url && !url.startsWith('http')) {\n        url = `https://www.interencheres.com${url}`;\n      }\n      \n      // Extraction image\n      const image = $el.find('img').first().attr('src') || '';\n      \n      // Extraction infos supplémentaires\n      const localisation = $el.find('[class*=\"location\"], .location').text().trim();\n      const dateEnchere = $el.find('[class*=\"date\"], .date').text().trim();\n      \n      // Ajouter le lot si valide\n      if (titre || url) {\n        lots.push({\n          titre: titre,\n          prix: prix || '0',\n          prixBrut: prixText,\n          url: url,\n          image: image,\n          localisation: localisation,\n          dateEnchere: dateEnchere,\n          source: 'interencheres',\n          extractedWith: selector,\n          timestamp: new Date().toISOString()\n        });\n      }\n    });\n    \n    // Arrêter après le premier sélecteur qui fonctionne\n    if (lots.length > 0) {\n      break;\n    }\n  }\n}\n\n// ========================================\n// FALLBACK: EXTRACTION DEPUIS JSON\n// ========================================\n\nif (lots.length === 0) {\n  console.log('⚠️  Tentative extraction depuis JSON...');\n  \n  // Chercher Nuxt data\n  const nuxtMatch = html.match(/__NUXT__\\s*=\\s*(\\{.+?\\});/s);\n  if (nuxtMatch) {\n    try {\n      const data = JSON.parse(nuxtMatch[1]);\n      // TODO: Parser le JSON selon la structure réelle\n      console.log('Nuxt data trouvé, mais parsing non implémenté');\n    } catch (e) {\n      console.error('Erreur parsing Nuxt:', e.message);\n    }\n  }\n}\n\n// ========================================\n// RETOURNER LES RÉSULTATS\n// ========================================\n\nconsole.log(`✅ Extraction terminée: ${lots.length} lots trouvés`);\n\nreturn [{\n  json: {\n    success: lots.length > 0,\n    totalLots: lots.length,\n    lots: lots,\n    keyword: $input.first().json.keyword || 'hilti',\n    timestamp: new Date().toISOString(),\n    debug: {\n      htmlSize: html.length,\n      sample: lots.slice(0, 3)\n    }\n  }\n}];"
+      },
+      "name": "Code - Extract Lots",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "mode": "multiplex",
+        "value": "={{$json.lots}}"
+      },
+      "name": "Split Out - Each Lot",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO opportunites (\n  titre,\n  prix_depart,\n  url,\n  image_url,\n  localisation,\n  date_enchere,\n  source,\n  statut,\n  metadata\n) VALUES (\n  '{{$json.titre}}',\n  {{$json.prix}},\n  '{{$json.url}}',\n  '{{$json.image}}',\n  '{{$json.localisation}}',\n  '{{$json.dateEnchere}}',\n  'interencheres',\n  'DETECTE',\n  '{{JSON.stringify($json)}}'\n)\nON CONFLICT (url) DO UPDATE SET\n  prix_depart = EXCLUDED.prix_depart,\n  updated_at = NOW()\nRETURNING *;"
+      },
+      "name": "PostgreSQL - Save Lot",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [1050, 300],
+      "credentials": {
+        "postgres": {
+          "id": "1",
+          "name": "PostgreSQL - FlipFinder"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$json.lots.length}}",
+              "value2": 0,
+              "operation": "larger"
+            }
+          ]
+        }
+      },
+      "name": "IF - Lots Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [850, 500]
+    },
+    {
+      "parameters": {
+        "chatId": "{{$env.TELEGRAM_CHAT_ID}}",
+        "text": "🔍 *Scan Interencheres*\n\n✅ {{$json.totalLots}} lots trouvés\n🔑 Keyword: {{$json.keyword}}\n⏰ {{$json.timestamp}}\n\n📊 Échantillon:\n{{$json.debug.sample.map(lot => `• ${lot.titre} - ${lot.prixBrut}`).join('\\n')}}"
+      },
+      "name": "Telegram - Alert Success",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1050, 500],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "{{$env.TELEGRAM_CHAT_ID}}",
+        "text": "⚠️ *Scan Interencheres - ÉCHEC*\n\n❌ Aucun lot trouvé\n🔑 Keyword: {{$json.keyword}}\n📏 HTML size: {{$json.debug.htmlSize}} bytes\n\n🔧 Vérifier:\n1. Sélecteurs CSS\n2. HTML complet chargé\n3. Structure du site"
+      },
+      "name": "Telegram - Alert Failure",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1050, 700],
+      "credentials": {
+        "telegramApi": {
+          "id": "1",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "keyword",
+              "value": "hilti"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Set Keywords",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [250, 300]
+    }
+  ],
+  "connections": {
+    "Cron - Every 30min": {
+      "main": [
+        [
+          {
+            "node": "Set Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Keywords": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Interencheres",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Interencheres": {
+      "main": [
+        [
+          {
+            "node": "Code - Extract Lots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Extract Lots": {
+      "main": [
+        [
+          {
+            "node": "Split Out - Each Lot",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF - Lots Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Out - Each Lot": {
+      "main": [
+        [
+          {
+            "node": "PostgreSQL - Save Lot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Lots Found": {
+      "main": [
+        [
+          {
+            "node": "Telegram - Alert Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram - Alert Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2024-11-01T10:00:00.000Z",
+  "versionId": "1"
+}

@@ -56,13 +56,23 @@
     },
     {
       "parameters": {
-        "jsCode": "// Extraction et scoring des résultats\nconst data = $input.first().json;\nconst html = data.html || data.body || '';\nconst keyword = $input.first().json.keyword;\n\n// Vérifier si Cloudflare est présent\nif (html.includes('challenge-platform') || html.includes('cf-browser-verification')) {\n  return [{ json: { error: 'Cloudflare détecté', keyword, html_preview: html.substring(0, 500) } }];\n}\n\n// Patterns de détection\nconst MARQUES_PREMIUM = {\n  'hilti': 2.5,\n  'festool': 2.3,\n  'milwaukee': 2.1,\n  'makita': 2.0,\n  'dewalt': 1.9,\n  'bosch': 1.7,\n  'metabo': 1.8\n};\n\nconst SIGNAUX_LIQUIDATION = [\n  { pattern: /liquidation\\s+judiciaire/i, score: 0.3 },\n  { pattern: /cessation\\s+activit[ée]/i, score: 0.3 },\n  { pattern: /fermeture\\s+entreprise/i, score: 0.25 },\n  { pattern: /d[ée]part\\s+retraite/i, score: 0.2 },\n  { pattern: /urgent/i, score: 0.15 }\n];\n\n// Parse HTML - Adaptation pour Interencheres\nconst results = [];\n\n// Patterns Interencheres (à adapter selon structure réelle)\nconst patterns = [\n  // Structure de base Interencheres\n  /<article[^>]*class=\"[^\"]*lot[^\"]*\"[^>]*>([\\s\\S]*?)<\\/article>/gi,\n  // Fallback si structure différente\n  /<div[^>]*class=\"[^\"]*result[^\"]*\"[^>]*>([\\s\\S]*?)<\\/div>/gi\n];\n\nfor (const regex of patterns) {\n  let match;\n  while ((match = regex.exec(html)) !== null) {\n    const itemHtml = match[1];\n    \n    // Extraction titre (plusieurs patterns possibles)\n    let titre = '';\n    const titlePatterns = [\n      /<h[2-4][^>]*>([^<]+)<\\/h[2-4]>/i,\n      /<[^>]*class=\"[^\"]*title[^\"]*\"[^>]*>([^<]+)</i,\n      /<a[^>]*title=\"([^\"]+)\"/i\n    ];\n    \n    for (const tp of titlePatterns) {\n      const tm = tp.exec(itemHtml);\n      if (tm) {\n        titre = tm[1].trim();\n        break;\n      }\n    }\n    \n    if (!titre) continue;\n    \n    // Extraction prix\n    const priceMatch = /(\\d+(?:[\\s,]\\d{3})*)\\s*€/i.exec(itemHtml);\n    const prix = priceMatch ? parseInt(priceMatch[1].replace(/[\\s,]/g, '')) : 0;\n    \n    // Extraction lien\n    const linkMatch = /href=\"([^\"]+)\"/i.exec(itemHtml);\n    let url = linkMatch ? linkMatch[1] : '';\n    if (url && !url.startsWith('http')) {\n      url = 'https://www.interencheres.com' + url;\n    }\n    \n    // Calcul du score\n    let score = 0;\n    let marque_detectee = null;\n    let multiplicateur = 1;\n    \n    // Détection marque\n    for (const [marque, mult] of Object.entries(MARQUES_PREMIUM)) {\n      if (titre.toLowerCase().includes(marque)) {\n        marque_detectee = marque;\n        multiplicateur = mult;\n        score += 0.4;\n        break;\n      }\n    }\n    \n    // Détection signaux liquidation\n    for (const signal of SIGNAUX_LIQUIDATION) {\n      if (signal.pattern.test(titre)) {\n        score += signal.score;\n      }\n    }\n    \n    // Score prix (plus c'est bas, mieux c'est)\n    if (prix > 0 && prix < 100) score += 0.3;\n    else if (prix < 200) score += 0.2;\n    else if (prix < 500) score += 0.1;\n    \n    // Estimation ROI\n    const valeur_estimee = prix * multiplicateur;\n    const roi_estime = multiplicateur - 1;\n    \n    if (score > 0.5) {\n      results.push({\n        json: {\n          titre,\n          prix,\n          url,\n          keyword,\n          score: Math.min(score, 1),\n          marque_detectee,\n          multiplicateur,\n          valeur_estimee,\n          roi_estime,\n          statut: 'DETECTE',\n          date_detection: new Date().toISOString()\n        }\n      });\n    }\n  }\n  \n  if (results.length > 0) break;\n}\n\nreturn results.length > 0 ? results : [{ json: { message: 'Aucun résultat pertinent', keyword, html_length: html.length } }];"
+        "jsCode": "// Nœud de synthèse et validation des données\nconst items = $input.all();\nconst keywords = $('Mots-clés Premium').all();\nconst synthese = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const data = items[i].json;\n  \n  // Récupérer le keyword correspondant depuis le nœud \"Mots-clés Premium\"\n  const keyword = keywords[i] ? keywords[i].json.keyword : 'unknown';\n  \n  const html = data.html || data.body || '';\n  const success = data.success !== undefined ? data.success : false;\n  const cloudflareDetected = data.cloudflareDetected || false;\n  \n  // Statistiques HTML\n  const htmlLength = html.length;\n  const hasContent = htmlLength > 10000;\n  \n  // Détection de contenu réel\n  const hasLots = html.includes('class=\"lot') || html.includes('result') || html.includes('<article');\n  const hasKeyword = keyword ? html.toLowerCase().includes(keyword.toLowerCase()) : false;\n  \n  synthese.push({\n    json: {\n      keyword: keyword,\n      success,\n      cloudflareDetected,\n      htmlLength,\n      hasContent,\n      hasLots,\n      hasKeyword,\n      status: success && !cloudflareDetected && hasContent ? '✅ OK' : '⚠️ Issue',\n      html: html,  // Conserver le HTML pour le nœud suivant\n      timestamp: new Date().toISOString()\n    }\n  });\n}\n\nreturn synthese;"
+      },
+      "id": "code-synthese",
+      "name": "📊 Synthèse & Validation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [775, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extraction et scoring des résultats - TOUS LES ITEMS\nconst items = $input.all();\nconst allResults = [];\n\n// Patterns de détection\nconst MARQUES_PREMIUM = {\n  'hilti': 2.5,\n  'festool': 2.3,\n  'milwaukee': 2.1,\n  'makita': 2.0,\n  'dewalt': 1.9,\n  'bosch': 1.7,\n  'metabo': 1.8\n};\n\nconst SIGNAUX_LIQUIDATION = [\n  { pattern: /liquidation\\s+judiciaire/i, score: 0.3 },\n  { pattern: /cessation\\s+activit[ée]/i, score: 0.3 },\n  { pattern: /fermeture\\s+entreprise/i, score: 0.25 },\n  { pattern: /d[ée]part\\s+retraite/i, score: 0.2 },\n  { pattern: /urgent/i, score: 0.15 }\n];\n\n// Patterns Interencheres (à adapter selon structure réelle)\nconst htmlPatterns = [\n  /<article[^>]*class=\"[^\"]*lot[^\"]*\"[^>]*>([\\s\\S]*?)<\\/article>/gi,\n  /<div[^>]*class=\"[^\"]*result[^\"]*\"[^>]*>([\\s\\S]*?)<\\/div>/gi\n];\n\n// Traiter chaque item (chaque keyword)\nfor (let i = 0; i < items.length; i++) {\n  const data = items[i].json;\n  const html = data.html || '';\n  const keyword = data.keyword || 'unknown';\n  \n  // Vérifier si Cloudflare CHALLENGE est présent (détection plus stricte)\n  const isCloudflareChallenge = (\n    (html.includes('cf-browser-verification') && html.includes('Checking your browser')) ||\n    (html.includes('challenge-platform') && html.includes('Just a moment')) ||\n    (html.includes('Cloudflare') && html.length < 5000)\n  );\n  \n  if (isCloudflareChallenge) {\n    allResults.push({ \n      json: { \n        error: 'Cloudflare détecté', \n        keyword, \n        html_preview: html.substring(0, 500) \n      } \n    });\n    continue;\n  }\n  \n  // Parse HTML pour ce keyword\n  let foundResults = false;\n  \n  for (const regex of htmlPatterns) {\n    let match;\n    while ((match = regex.exec(html)) !== null) {\n      const itemHtml = match[1];\n      \n      // Extraction titre\n      let titre = '';\n      const titlePatterns = [\n        /<h[2-4][^>]*>([^<]+)<\\/h[2-4]>/i,\n        /<[^>]*class=\"[^\"]*title[^\"]*\"[^>]*>([^<]+)</i,\n        /<a[^>]*title=\"([^\"]+)\"/i\n      ];\n      \n      for (const tp of titlePatterns) {\n        const tm = tp.exec(itemHtml);\n        if (tm) {\n          titre = tm[1].trim();\n          break;\n        }\n      }\n      \n      if (!titre) continue;\n      \n      // Extraction prix\n      const priceMatch = /(\\d+(?:[\\s,]\\d{3})*)\\s*€/i.exec(itemHtml);\n      const prix = priceMatch ? parseInt(priceMatch[1].replace(/[\\s,]/g, '')) : 0;\n      \n      // Extraction lien\n      const linkMatch = /href=\"([^\"]+)\"/i.exec(itemHtml);\n      let url = linkMatch ? linkMatch[1] : '';\n      if (url && !url.startsWith('http')) {\n        url = 'https://www.interencheres.com' + url;\n      }\n      \n      // Calcul du score\n      let score = 0;\n      let marque_detectee = null;\n      let multiplicateur = 1;\n      \n      // Détection marque\n      for (const [marque, mult] of Object.entries(MARQUES_PREMIUM)) {\n        if (titre.toLowerCase().includes(marque)) {\n          marque_detectee = marque;\n          multiplicateur = mult;\n          score += 0.4;\n          break;\n        }\n      }\n      \n      // Détection signaux liquidation\n      for (const signal of SIGNAUX_LIQUIDATION) {\n        if (signal.pattern.test(titre)) {\n          score += signal.score;\n        }\n      }\n      \n      // Score prix (plus c'est bas, mieux c'est)\n      if (prix > 0 && prix < 100) score += 0.3;\n      else if (prix < 200) score += 0.2;\n      else if (prix < 500) score += 0.1;\n      \n      // Estimation ROI\n      const valeur_estimee = prix * multiplicateur;\n      const roi_estime = multiplicateur - 1;\n      \n      if (score > 0.5) {\n        allResults.push({\n          json: {\n            titre,\n            prix,\n            url,\n            keyword,\n            score: Math.min(score, 1),\n            marque_detectee,\n            multiplicateur,\n            valeur_estimee,\n            roi_estime,\n            statut: 'DETECTE',\n            date_detection: new Date().toISOString()\n          }\n        });\n        foundResults = true;\n      }\n    }\n    \n    if (foundResults) break;\n  }\n  \n  // Si aucun résultat trouvé pour ce keyword\n  if (!foundResults) {\n    allResults.push({ \n      json: { \n        message: 'Aucun résultat pertinent', \n        keyword, \n        html_length: html.length \n      } \n    });\n  }\n}\n\nreturn allResults.length > 0 ? allResults : [{ json: { message: 'Aucun item traité' } }];"
       },
       "id": "code-scoring",
       "name": "Extraction + Scoring",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [880, 300]
+      "position": [985, 300]
     },
     {
       "parameters": {
@@ -91,7 +101,7 @@
       "name": "Score > 0.7",
       "type": "n8n-nodes-base.filter",
       "typeVersion": 2,
-      "position": [1090, 300]
+      "position": [1195, 300]
     },
     {
       "parameters": {
@@ -120,7 +130,7 @@
       "name": "Sauvegarder en DB",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.4,
-      "position": [1300, 300],
+      "position": [1405, 300],
       "credentials": {
         "postgres": {
           "id": "postgres-credentials",
@@ -150,7 +160,7 @@
       "name": "Alerte Discord",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1300, 480]
+      "position": [1405, 480]
     }
   ],
   "connections": {
@@ -177,6 +187,17 @@
       ]
     },
     "Scan Interencheres (Stealth)": {
+      "main": [
+        [
+          {
+            "node": "📊 Synthèse & Validation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Synthèse & Validation": {
       "main": [
         [
           {
