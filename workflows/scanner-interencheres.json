@@ -33,7 +33,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ {\n  \"url\": \"https://www.interencheres.com/recherche/?keyword=\" + encodeURIComponent($json.keyword) + \"&cat=14\",\n  \"waitFor\": 8000\n} }}",
+        "jsonBody": "={{ {\n  \"url\": \"https://www.interencheres.com/recherche/lots?location=\" + encodeURIComponent('{\"lat\":44.840116,\"lon\":-0.570681,\"city\":\" Bordeaux, Gironde, France\"}') + \"&radius=50&search=\" + encodeURIComponent($json.keyword),\n  \"waitFor\": 8000\n} }}",
         "options": {
           "timeout": 90000
         }
@@ -66,7 +66,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Extraction et scoring des résultats - TOUS LES ITEMS\nconst items = $input.all();\nconst allResults = [];\n\n// Patterns de détection\nconst MARQUES_PREMIUM = {\n  'hilti': 2.5,\n  'festool': 2.3,\n  'milwaukee': 2.1,\n  'makita': 2.0,\n  'dewalt': 1.9,\n  'bosch': 1.7,\n  'metabo': 1.8\n};\n\nconst SIGNAUX_LIQUIDATION = [\n  { pattern: /liquidation\\s+judiciaire/i, score: 0.3 },\n  { pattern: /cessation\\s+activit[ée]/i, score: 0.3 },\n  { pattern: /fermeture\\s+entreprise/i, score: 0.25 },\n  { pattern: /d[ée]part\\s+retraite/i, score: 0.2 },\n  { pattern: /urgent/i, score: 0.15 }\n];\n\n// Patterns Interencheres (à adapter selon structure réelle)\nconst htmlPatterns = [\n  /<article[^>]*class=\"[^\"]*lot[^\"]*\"[^>]*>([\\s\\S]*?)<\\/article>/gi,\n  /<div[^>]*class=\"[^\"]*result[^\"]*\"[^>]*>([\\s\\S]*?)<\\/div>/gi\n];\n\n// Traiter chaque item (chaque keyword)\nfor (let i = 0; i < items.length; i++) {\n  const data = items[i].json;\n  const html = data.html || '';\n  const keyword = data.keyword || 'unknown';\n  \n  // Vérifier si Cloudflare CHALLENGE est présent (détection plus stricte)\n  const isCloudflareChallenge = (\n    (html.includes('cf-browser-verification') && html.includes('Checking your browser')) ||\n    (html.includes('challenge-platform') && html.includes('Just a moment')) ||\n    (html.includes('Cloudflare') && html.length < 5000)\n  );\n  \n  if (isCloudflareChallenge) {\n    allResults.push({ \n      json: { \n        error: 'Cloudflare détecté', \n        keyword, \n        html_preview: html.substring(0, 500) \n      } \n    });\n    continue;\n  }\n  \n  // Parse HTML pour ce keyword\n  let foundResults = false;\n  \n  for (const regex of htmlPatterns) {\n    let match;\n    while ((match = regex.exec(html)) !== null) {\n      const itemHtml = match[1];\n      \n      // Extraction titre\n      let titre = '';\n      const titlePatterns = [\n        /<h[2-4][^>]*>([^<]+)<\\/h[2-4]>/i,\n        /<[^>]*class=\"[^\"]*title[^\"]*\"[^>]*>([^<]+)</i,\n        /<a[^>]*title=\"([^\"]+)\"/i\n      ];\n      \n      for (const tp of titlePatterns) {\n        const tm = tp.exec(itemHtml);\n        if (tm) {\n          titre = tm[1].trim();\n          break;\n        }\n      }\n      \n      if (!titre) continue;\n      \n      // Extraction prix\n      const priceMatch = /(\\d+(?:[\\s,]\\d{3})*)\\s*€/i.exec(itemHtml);\n      const prix = priceMatch ? parseInt(priceMatch[1].replace(/[\\s,]/g, '')) : 0;\n      \n      // Extraction lien\n      const linkMatch = /href=\"([^\"]+)\"/i.exec(itemHtml);\n      let url = linkMatch ? linkMatch[1] : '';\n      if (url && !url.startsWith('http')) {\n        url = 'https://www.interencheres.com' + url;\n      }\n      \n      // Calcul du score\n      let score = 0;\n      let marque_detectee = null;\n      let multiplicateur = 1;\n      \n      // Détection marque\n      for (const [marque, mult] of Object.entries(MARQUES_PREMIUM)) {\n        if (titre.toLowerCase().includes(marque)) {\n          marque_detectee = marque;\n          multiplicateur = mult;\n          score += 0.4;\n          break;\n        }\n      }\n      \n      // Détection signaux liquidation\n      for (const signal of SIGNAUX_LIQUIDATION) {\n        if (signal.pattern.test(titre)) {\n          score += signal.score;\n        }\n      }\n      \n      // Score prix (plus c'est bas, mieux c'est)\n      if (prix > 0 && prix < 100) score += 0.3;\n      else if (prix < 200) score += 0.2;\n      else if (prix < 500) score += 0.1;\n      \n      // Estimation ROI\n      const valeur_estimee = prix * multiplicateur;\n      const roi_estime = multiplicateur - 1;\n      \n      if (score > 0.5) {\n        allResults.push({\n          json: {\n            titre,\n            prix,\n            url,\n            keyword,\n            score: Math.min(score, 1),\n            marque_detectee,\n            multiplicateur,\n            valeur_estimee,\n            roi_estime,\n            statut: 'DETECTE',\n            date_detection: new Date().toISOString()\n          }\n        });\n        foundResults = true;\n      }\n    }\n    \n    if (foundResults) break;\n  }\n  \n  // Si aucun résultat trouvé pour ce keyword\n  if (!foundResults) {\n    allResults.push({ \n      json: { \n        message: 'Aucun résultat pertinent', \n        keyword, \n        html_length: html.length \n      } \n    });\n  }\n}\n\nreturn allResults.length > 0 ? allResults : [{ json: { message: 'Aucun item traité' } }];"
+        "jsCode": "// Extraction et scoring basé sur la vraie structure HTML Interencheres\nconst items = $input.all();\nconst allResults = [];\n\n// Patterns de détection\nconst MARQUES_PREMIUM = {\n  'hilti': 2.5,\n  'festool': 2.3,\n  'milwaukee': 2.1,\n  'makita': 2.0,\n  'dewalt': 1.9,\n  'bosch': 1.7,\n  'metabo': 1.8\n};\n\nconst SIGNAUX_LIQUIDATION = [\n  { pattern: /liquidation\\s+judiciaire/i, score: 0.3 },\n  { pattern: /cessation\\s+activit[ée]/i, score: 0.3 },\n  { pattern: /fermeture\\s+entreprise/i, score: 0.25 },\n  { pattern: /d[ée]part\\s+retraite/i, score: 0.2 },\n  { pattern: /urgent/i, score: 0.15 }\n];\n\n// Traiter chaque item (chaque keyword)\nfor (let i = 0; i < items.length; i++) {\n  const data = items[i].json;\n  const html = data.html || '';\n  const keyword = data.keyword || 'unknown';\n  \n  // Vérifier Cloudflare CHALLENGE\n  const isCloudflareChallenge = (\n    (html.includes('cf-browser-verification') && html.includes('Checking your browser')) ||\n    (html.includes('challenge-platform') && html.includes('Just a moment')) ||\n    (html.includes('Cloudflare') && html.length < 5000)\n  );\n  \n  if (isCloudflareChallenge) {\n    allResults.push({ \n      json: { \n        error: 'Cloudflare détecté', \n        keyword, \n        html_preview: html.substring(0, 500) \n      } \n    });\n    continue;\n  }\n  \n  // EXTRACTION DES LOTS - Structure Interencheres réelle\n  // Pattern: <a href=\"/biens-equipement/.../lot-XXXXX.html\" ... id=\"XXXXX\">\n  const lotPattern = /<a[^>]*href=\"([^\"]*\\/lot-\\d+\\.html)\"[^>]*id=\"(\\d+)\"[^>]*>([\\s\\S]*?)<\\/a>/gi;\n  \n  let match;\n  let lotsFound = 0;\n  \n  while ((match = lotPattern.exec(html)) !== null) {\n    const url = 'https://www.interencheres.com' + match[1];\n    const lotId = match[2];\n    const lotContent = match[3];\n    \n    // Extraction titre - <div class=\"title text-subtitle-2 font-weight-bold white--text\">\n    const titreMatch = /<div[^>]*class=\"[^\"]*title[^\"]*text-subtitle-2[^\"]*\"[^>]*>\\s*<div[^>]*>([^<]+)<\\/div>/i.exec(lotContent);\n    if (!titreMatch) continue;\n    \n    const titre = titreMatch[1].trim();\n    \n    // Extraction estimation du vendeur (optionnelle)\n    let estimation_vendeur_min = null;\n    let estimation_vendeur_max = null;\n    const estimationVendeurMatch = /Estimation\\s*:\\s*<\\/span>\\s*<span[^>]*>(\\d+)(?:&nbsp;)?\\s*€\\s*-\\s*(\\d+)(?:&nbsp;)?\\s*€/i.exec(lotContent);\n    if (estimationVendeurMatch) {\n      estimation_vendeur_min = parseInt(estimationVendeurMatch[1]);\n      estimation_vendeur_max = parseInt(estimationVendeurMatch[2]);\n    }\n\n    // Extraction prix - Mise à prix\n    let prix = 0;\n    const miseAPrixMatch = /Mise\\s+à\\s+prix\\s*:\\s*<\\/span>\\s*<span[^>]*>(\\d+)(?:&nbsp;)?\\s*€/i.exec(lotContent);\n    if (miseAPrixMatch) {\n      prix = parseInt(miseAPrixMatch[1]);\n    } else if (estimation_vendeur_min) {\n      // Si pas de mise à prix, utiliser l'estimation min comme référence\n      prix = estimation_vendeur_min;\n    }\n    \n    // Calcul du score\n    let score = 0;\n    let marque_detectee = null;\n    let multiplicateur = 1;\n    \n    // Détection marque\n    for (const [marque, mult] of Object.entries(MARQUES_PREMIUM)) {\n      if (titre.toLowerCase().includes(marque)) {\n        marque_detectee = marque;\n        multiplicateur = mult;\n        score += 0.4;\n        break;\n      }\n    }\n    \n    // Détection signaux liquidation\n    for (const signal of SIGNAUX_LIQUIDATION) {\n      if (signal.pattern.test(titre)) {\n        score += signal.score;\n      }\n    }\n    \n    // Score prix (plus c'est bas, mieux c'est)\n    if (prix > 0 && prix < 100) score += 0.3;\n    else if (prix < 200) score += 0.2;\n    else if (prix < 500) score += 0.1;\n    \n    // Estimation ROI\n    const valeur_estimee = Math.round(prix * multiplicateur);\n    const roi_estime = Math.round((multiplicateur - 1) * 100) / 100;\n    \n    // Conserver tous les lots avec score > 0.3 (pas juste 0.5)\n    if (score > 0.3) {\n      allResults.push({\n        json: {\n          titre,\n          prix,\n          estimation_vendeur_min,\n          estimation_vendeur_max,\n          url,\n          lot_id: lotId,\n          keyword,\n          score: Math.round(score * 100) / 100,\n          marque_detectee,\n          multiplicateur,\n          valeur_estimee,\n          roi_estime,\n          statut: 'DETECTE',\n          date_detection: new Date().toISOString()\n        }\n      });\n      lotsFound++;\n    }\n  }\n  \n  // Si aucun résultat trouvé pour ce keyword\n  if (lotsFound === 0) {\n    allResults.push({ \n      json: { \n        message: 'Aucun lot trouvé', \n        keyword, \n        html_length: html.length,\n        has_autoqa_class: html.includes('autoqa-sale-details-item'),\n        has_lot_links: html.includes('/lot-')\n      } \n    });\n  }\n}\n\nreturn allResults.length > 0 ? allResults : [{ json: { message: 'Aucun item traité' } }];"
       },
       "id": "code-scoring",
       "name": "Extraction + Scoring",
@@ -76,91 +76,50 @@
     },
     {
       "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
-          "conditions": [
-            {
-              "id": "condition-score",
-              "leftValue": "={{ $json.score }}",
-              "rightValue": 0.7,
-              "operator": {
-                "type": "number",
-                "operation": "gte"
-              }
-            }
-          ],
-          "combinator": "and"
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.GOOGLE_SHEET_ID }}",
+          "mode": "id"
         },
-        "options": {}
-      },
-      "id": "filter-score",
-      "name": "Score > 0.7",
-      "type": "n8n-nodes-base.filter",
-      "typeVersion": 2,
-      "position": [1195, 300]
-    },
-    {
-      "parameters": {
-        "operation": "insert",
-        "schema": {
-          "schema": "public"
-        },
-        "table": {
-          "table": "opportunites"
+        "sheetName": {
+          "__rl": true,
+          "value": "Scanner Interencheres",
+          "mode": "name"
         },
         "columns": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "titre": "={{ $json.titre }}",
-            "prix_achat": "={{ $json.prix }}",
-            "url_source": "={{ $json.url }}",
-            "score": "={{ $json.score }}",
-            "marques_detectees": "={{ { marque: $json.marque_detectee } }}",
-            "facteurs": "={{ { roi_estime: $json.roi_estime, multiplicateur: $json.multiplicateur, valeur_estimee: $json.valeur_estimee } }}",
-            "statut": "DETECTE"
-          }
-        },
-        "options": {}
-      },
-      "id": "postgres-insert",
-      "name": "Sauvegarder en DB",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.4,
-      "position": [1405, 300],
-      "credentials": {
-        "postgres": {
-          "id": "postgres-credentials",
-          "name": "PostgreSQL Outillage"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "={{ $env.DISCORD_WEBHOOK_URL }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": ["lot_id"],
+          "schema": [
+            { "id": "titre", "displayName": "Titre", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" },
+            { "id": "prix", "displayName": "Prix", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
+            { "id": "estimation_vendeur_min", "displayName": "Estimation Min", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
+            { "id": "estimation_vendeur_max", "displayName": "Estimation Max", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
+            { "id": "url", "displayName": "URL", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" },
+            { "id": "lot_id", "displayName": "Lot ID", "required": false, "defaultMatch": true, "canBeUsedToMatch": true, "type": "string" },
+            { "id": "keyword", "displayName": "Keyword", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" },
+            { "id": "score", "displayName": "Score", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
+            { "id": "marque_detectee", "displayName": "Marque", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" },
+            { "id": "multiplicateur", "displayName": "Multiplicateur", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
+            { "id": "valeur_estimee", "displayName": "Valeur Estimée", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
+            { "id": "roi_estime", "displayName": "ROI Estimé", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
+            { "id": "statut", "displayName": "Statut", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" },
+            { "id": "date_detection", "displayName": "Date Détection", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" }
           ]
         },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ {\n  \"embeds\": [{\n    \"title\": \"🔥 Opportunité détectée !\",\n    \"description\": $json.titre,\n    \"color\": 16737792,\n    \"fields\": [\n      { \"name\": \"💰 Prix\", \"value\": $json.prix + \"€\", \"inline\": true },\n      { \"name\": \"📊 Score\", \"value\": Math.round($json.score * 100) + \"%\", \"inline\": true },\n      { \"name\": \"🏷️ Marque\", \"value\": $json.marque_detectee || \"Non détectée\", \"inline\": true },\n      { \"name\": \"📈 ROI estimé\", \"value\": Math.round($json.roi_estime * 100) + \"%\", \"inline\": true },\n      { \"name\": \"💵 Valeur estimée\", \"value\": $json.valeur_estimee + \"€\", \"inline\": true }\n    ],\n    \"url\": $json.url,\n    \"timestamp\": new Date().toISOString()\n  }]\n} }}",
         "options": {}
       },
-      "id": "discord-alert",
-      "name": "Alerte Discord",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [1405, 480]
+      "id": "google-sheets-append",
+      "name": "Sauvegarder dans Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1195, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-credentials",
+          "name": "Google Sheets FlipFinder"
+        }
+      }
     }
   ],
   "connections": {
@@ -212,23 +171,7 @@
       "main": [
         [
           {
-            "node": "Score > 0.7",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Score > 0.7": {
-      "main": [
-        [
-          {
-            "node": "Sauvegarder en DB",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Alerte Discord",
+            "node": "Sauvegarder dans Google Sheets",
             "type": "main",
             "index": 0
           }

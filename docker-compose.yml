@@ -34,9 +34,11 @@ services:
     environment:
       - N8N_HOST=0.0.0.0
       - N8N_PORT=5678
-      - N8N_PROTOCOL=http
+      - N8N_PROTOCOL=https
+      - 'N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL:-https://flipfinder.ara-solutions.cloud}'
+      - 'WEBHOOK_URL=${WEBHOOK_URL:-https://flipfinder.ara-solutions.cloud}'
+      - 'WEBHOOK_TUNNEL_URL=${WEBHOOK_URL:-https://flipfinder.ara-solutions.cloud}'
       - NODE_ENV=production
-      - 'WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678}'
       - 'N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:-changeThisToARandomString}'
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
       - DB_TYPE=postgresdb
