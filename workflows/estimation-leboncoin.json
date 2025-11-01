@@ -11,13 +11,13 @@
           ]
         }
       },
-      "id": "b4bad458-519d-4d47-aab2-e499d35c0cad",
+      "id": "c73263de-4a55-4bc0-8530-8fa9b335045a",
       "name": "Toutes les 2h",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
       "position": [
-        -176,
-        -16
+        -32,
+        -368
       ]
     },
     {
@@ -31,25 +31,17 @@
           "__rl": true,
           "value": "gid=0",
           "mode": "list",
-          "cachedResultName": "Produits",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1aXhXYEybgfXURg2QYduYL61dSPv4WPPqzp4hfgPpGNo/edit#gid=0"
-        },
-        "filtersUI": {
-          "values": [
-            {
-              "lookupColumn": "etat"
-            }
-          ]
+          "cachedResultName": "Produits"
         },
         "options": {}
       },
-      "id": "4783fc9b-fbde-4aaa-9ef5-0c3fd6e5d382",
+      "id": "d71c3e55-9bc9-4a08-9006-1c746939ee0a",
       "name": "Lire Google Sheets",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
       "position": [
-        48,
-        -16
+        336,
+        -416
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -60,49 +52,21 @@
     },
     {
       "parameters": {
-        "jsCode": "// Filtrer uniquement les produits sans estimation LeBonCoin\nconst items = $input.all();\nconst toEstimate = [];\n\nfor (const item of items) {\n  const data = item.json;\n  \n  // Ne traiter que les lots avec marque détectée et sans estimation existante\n  if (data.marque_detectee && \n      data.marque_detectee !== '' && \n      (!data.prix_lbc_min || data.prix_lbc_min === '')) {\n    toEstimate.push({\n      json: {\n        lot_id: data.lot_id,\n        titre: data.titre,\n        marque_detectee: data.marque_detectee,\n        prix_interencheres: data.prix,\n        url_interencheres: data.url\n      }\n    });\n  }\n}\n\nreturn toEstimate.length > 0 ? toEstimate : [];"
+        "jsCode": "// Patterns de références par marque\nconst REFERENCE_PATTERNS = {\n  'hilti': [\n    /\\b(TE[\\s-]?\\d+[A-Z]*)/gi,\n    /\\b(DD[\\s-]?\\d+[A-Z]*)/gi,\n    /\\b(SDS[\\s-]?\\d+)/gi,\n    /\\b(SF[\\s-]?\\d+[A-Z]*)/gi\n  ],\n  'festool': [\n    /\\b(TS[\\s-]?\\d+)/gi,\n    /\\b(OF[\\s-]?\\d+[A-Z]*)/gi,\n    /\\b(CT[\\s-]?\\d+)/gi,\n    /\\b(RO[\\s-]?\\d+)/gi\n  ],\n  'milwaukee': [\n    /\\b(M\\d{2}[A-Z]*\\d*)/gi,\n    /\\b(HD18[A-Z]*)/gi,\n    /\\b(PD[\\s-]?\\d+)/gi\n  ],\n  'makita': [\n    /\\b(D[A-Z]{2}\\d{3,4}[A-Z]*)/gi,\n    /\\b(BL\\d{4})/gi,\n    /\\b(HR\\d{4})/gi\n  ],\n  'dewalt': [\n    /\\b(DC[A-Z]\\d{3})/gi,\n    /\\b(DW[A-Z]\\d{3})/gi,\n    /\\b(DCF\\d{3})/gi\n  ],\n  'bosch': [\n    /\\b(GBH[\\s-]?\\d+[A-Z]*)/gi,\n    /\\b(GSR[\\s-]?\\d+)/gi,\n    /\\b(GWS[\\s-]?\\d+)/gi\n  ]\n};\n\n// Mots-clés importants pour l'outillage (à conserver)\nconst KEYWORDS_OUTILLAGE = [\n  'perceuse', 'visseuse', 'perforateur', 'meuleuse', 'scie', 'ponceuse',\n  'raboteuse', 'défonceuse', 'sauteuse', 'circulaire', 'plongeante',\n  'burineur', 'marteau', 'piqueur', 'fraiseuse', 'tronçonneuse',\n  'aspirateur', 'souffleur', 'cloueuse', 'agrafeuse', 'décapeur',\n  'filaire', 'sans fil', 'batterie', 'brushless', 'coffret', 'systainer',\n  'v', 'ah', 'w', 'watts', 'volts', 'lithium', 'li-ion',\n  'sds', 'plus', 'max', 'compact', 'fuel', 'xr', 'professional'\n];\n\n// Mots non pertinents à supprimer\nconst STOPWORDS = [\n  'lot', 'de', 'le', 'la', 'les', 'un', 'une', 'des', 'avec', 'sans',\n  'en', 'pour', 'par', 'sur', 'sous', 'et', 'ou', 'très', 'bon', 'état',\n  'neuf', 'occasion', 'comme', 'quasi', 'pro', 'professionnel',\n  'outil', 'outils', 'machine', 'machines', 'accessoire', 'accessoires'\n];\n\n// Extraire référence depuis titre\nfunction extractReference(titre, marque) {\n  if (!titre || !marque) return null;\n  \n  const marqueLower = marque.toLowerCase();\n  const patterns = REFERENCE_PATTERNS[marqueLower];\n  \n  if (!patterns) return null;\n  \n  for (const pattern of patterns) {\n    const matches = titre.match(pattern);\n    if (matches && matches.length > 0) {\n      // Normaliser la référence (enlever espaces/tirets)\n      return matches[0].replace(/[\\s-]/g, '').toUpperCase();\n    }\n  }\n  \n  return null;\n}\n\n// FALLBACK : Extraire mots-clés intelligents si pas de référence\nfunction extractSmartKeywords(titre, marque) {\n  if (!titre) return marque || '';\n  \n  // Nettoyer le titre\n  let clean = titre.toLowerCase();\n  \n  // Enlever la marque du titre (on la rajoutera après)\n  if (marque) {\n    clean = clean.replace(new RegExp(marque, 'gi'), '');\n  }\n  \n  // Découper en mots\n  const words = clean.split(/[\\s\\-_,;.()\\[\\]]+/).filter(w => w.length > 0);\n  \n  // Garder les mots pertinents\n  const relevantWords = [];\n  \n  for (const word of words) {\n    // Ignorer les stopwords\n    if (STOPWORDS.includes(word)) continue;\n    \n    // Garder les nombres (voltage, capacité, etc.)\n    if (/^\\d+[vwah]*$/.test(word)) {\n      relevantWords.push(word);\n      continue;\n    }\n    \n    // Garder les keywords outillage\n    if (KEYWORDS_OUTILLAGE.includes(word)) {\n      relevantWords.push(word);\n      continue;\n    }\n    \n    // Garder les mots > 4 caractères (probablement importants)\n    if (word.length > 4) {\n      relevantWords.push(word);\n    }\n  }\n  \n  // Limiter à 4 mots max pour éviter requête trop longue\n  const topKeywords = relevantWords.slice(0, 4).join(' ');\n  \n  // Retourner marque + mots-clés\n  return marque ? `${marque} ${topKeywords}` : topKeywords;\n}\n\n// Filtrer et enrichir les produits\nconst items = $input.all();\nconst toEstimate = [];\n\nfor (const item of items) {\n  const data = item.json;\n  \n  // Conditions : marque détectée ET pas encore estimé\n  if (data.marque_detectee && \n      data.marque_detectee !== '' && \n      (!data.prix_lbc_min || data.prix_lbc_min === '')) {\n    \n    // Essayer d'extraire la référence\n    const reference = extractReference(data.titre, data.marque_detectee);\n    \n    let searchQuery = '';\n    let searchType = '';\n    \n    if (reference) {\n      // CAS 1 : Référence trouvée → Marque + Référence\n      searchQuery = `${data.marque_detectee} ${reference}`;\n      searchType = 'reference';\n    } else {\n      // CAS 2 : Pas de référence → Extraction intelligente de mots-clés\n      searchQuery = extractSmartKeywords(data.titre, data.marque_detectee);\n      searchType = 'keywords';\n    }\n    \n    toEstimate.push({\n      json: {\n        lot_id: data.lot_id,\n        titre: data.titre,\n        marque_detectee: data.marque_detectee,\n        reference_extraite: reference || null,\n        search_query: searchQuery,\n        search_type: searchType,\n        prix_interencheres: data.prix || 0,\n        url_interencheres: data.url\n      }\n    });\n  }\n}\n\nreturn toEstimate.length > 0 ? toEstimate : [];"
       },
-      "id": "de7b999b-f47f-4a8e-8ee4-7e93e5bc199d",
-      "name": "Filtrer produits à estimer",
+      "id": "883dc6f6-b363-4e74-b23b-eecfc468adc1",
+      "name": "Extraire Référence Produit",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        256,
-        -16
-      ]
-    },
-    {
-      "parameters": {
-        "options": {
-          "reset": false
-        }
-      },
-      "id": "8d48a70d-a054-4082-a266-ff3c011f5cbf",
-      "name": "Traiter un par un",
-      "type": "n8n-nodes-base.splitInBatches",
-      "typeVersion": 3,
-      "position": [
-        464,
-        -16
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Construire URL de recherche LeBonCoin\nconst data = $input.first().json;\nconst searchQuery = encodeURIComponent(data.titre);\n\n// URL LeBonCoin avec paramètres de recherche\nconst lbcUrl = `https://www.leboncoin.fr/recherche?text=${searchQuery}&category=15&owner_type=all&sort=time&order=desc`;\n\nreturn {\n  json: {\n    ...data,\n    lbc_search_url: lbcUrl\n  }\n};"
-      },
-      "id": "64b55479-cc95-4747-8c3f-f46049ed62c4",
-      "name": "Construire URL LeBonCoin",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        672,
-        -16
+        496,
+        -384
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "=http://playwright-stealth:3001/scrape",
+        "url": "http://ollama:11434/api/generate",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -114,31 +78,109 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ {\n  \"url\": $json.lbc_search_url,\n  \"waitFor\": 5000\n} }}",
+        "jsonBody": "={{ {\n  \"model\": \"mistral\",\n  \"prompt\": \"Tu es un expert en optimisation de titres pour recherche e-commerce.\\n\\nTitre original: \\\"\" + $json.titre + \"\\\"\\nMarque: \" + $json.marque_detectee + (($json.reference_extraite) ? \"\\nRéférence: \" + $json.reference_extraite : \"\") + \"\\n\\nCrée un titre de recherche optimisé pour LeBonCoin (5-7 mots max) qui maximise les chances de trouver ce produit.\\n\\nRègles:\\n1. Commencer par la marque\\n2. Inclure la référence si disponible\\n3. Ajouter le type d'outil principal\\n4. Supprimer: numéros de lot, accessoires secondaires, mots comme 'avec', 'lot'\\n5. Format: Marque [Référence] Type [Caractéristique]\\n\\nExemples:\\n- 'Lot 453 Hilti TE 60 ATC avec batteries' → 'Hilti TE60 perforateur'\\n- 'DeWalt perceuse visseuse 18V lithium' → 'DeWalt perceuse visseuse 18v'\\n\\nRéponds UNIQUEMENT avec le titre optimisé, rien d'autre.\",\n  \"stream\": false,\n  \"options\": {\n    \"temperature\": 0.3,\n    \"num_predict\": 30\n  }\n} }}",
         "options": {
-          "timeout": 90000
+          "timeout": 30000
         }
       },
-      "id": "eff09e4a-671e-4c03-84c0-19969fc35999",
-      "name": "Scraper LeBonCoin",
+      "id": "2ebd38b6-a9c5-4dae-bdc4-915399559678",
+      "name": "Optimiser Titre avec IA",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        880,
-        -16
+        608,
+        -752
       ]
     },
     {
       "parameters": {
-        "jsCode": "// Extraire les prix des annonces LeBonCoin\nconst currentItem = $input.first().json;\nconst html = currentItem.html || '';\n\n// Pattern pour extraire les prix LeBonCoin\n// Structure: <span data-qa-id=\"aditem_price\">150&nbsp;€</span>\nconst pricePattern = /<span[^>]*data-qa-id=\"aditem_price\"[^>]*>([\\d\\s]+)(?:&nbsp;)?€<\\/span>/gi;\n\nconst prices = [];\nlet match;\n\nwhile ((match = pricePattern.exec(html)) !== null) {\n  const priceStr = match[1].replace(/[\\s&nbsp;]/g, '');\n  const price = parseInt(priceStr);\n  if (price > 0 && price < 10000) {  // Filtrer les prix aberrants\n    prices.push(price);\n  }\n}\n\n// Calculer statistiques si on a trouvé des prix\nlet prix_lbc_min = null;\nlet prix_lbc_max = null;\nlet prix_lbc_moyen = null;\nlet nb_annonces_lbc = 0;\n\nif (prices.length > 0) {\n  prices.sort((a, b) => a - b);\n  prix_lbc_min = prices[0];\n  prix_lbc_max = prices[prices.length - 1];\n  prix_lbc_moyen = Math.round(prices.reduce((sum, p) => sum + p, 0) / prices.length);\n  nb_annonces_lbc = prices.length;\n}\n\n// Calculer l'opportunité\nlet opportunite_estimee = null;\nif (prix_lbc_moyen && currentItem.prix_interencheres) {\n  opportunite_estimee = prix_lbc_moyen - currentItem.prix_interencheres;\n}\n\nreturn {\n  json: {\n    lot_id: currentItem.lot_id,\n    prix_lbc_min,\n    prix_lbc_max,\n    prix_lbc_moyen,\n    nb_annonces_lbc,\n    opportunite_estimee,\n    date_estimation: new Date().toISOString()\n  }\n};"
+        "jsCode": "// Extraire le titre optimisé de la réponse Ollama\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const ollamaResponse = item.json.response || '';\n  \n  // Nettoyer la réponse (enlever guillemets, retours ligne, etc.)\n  let titreOptimise = ollamaResponse.trim()\n    .replace(/^[\"'`]+|[\"'`]+$/g, '')  // Enlever guillemets début/fin\n    .replace(/\\n.*/g, '')  // Garder seulement la première ligne\n    .trim();\n  \n  // Récupérer les données originales du node précédent\n  const originalData = $('Extraire Référence Produit').all().find(d => \n    d.json.lot_id === item.json.lot_id || true  // Fallback si pas de lot_id\n  )?.json || {};\n  \n  // Si l'IA n'a pas répondu correctement, utiliser le search_query de base\n  if (!titreOptimise || titreOptimise.length < 3 || titreOptimise.length > 100) {\n    titreOptimise = originalData.search_query;\n  }\n  \n  results.push({\n    json: {\n      lot_id: originalData.lot_id,\n      titre: originalData.titre,\n      marque_detectee: originalData.marque_detectee,\n      reference_extraite: originalData.reference_extraite,\n      search_query_auto: originalData.search_query,\n      search_query: titreOptimise,\n      search_type: originalData.search_type,\n      prix_interencheres: originalData.prix_interencheres,\n      url_interencheres: originalData.url_interencheres\n    }\n  });\n}\n\nreturn results;"
       },
-      "id": "70d2c715-13b3-4ca4-a186-221b4b69f7de",
-      "name": "Extraire prix LeBonCoin",
+      "id": "e559a1aa-33ec-41f9-ac22-07b6284c13ea",
+      "name": "Traiter Réponse IA",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1088,
-        -16
+        1008,
+        -704
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "reset": false
+        }
+      },
+      "id": "bccb6749-c74b-45d1-be87-5f8e84b466cd",
+      "name": "Traiter un par un",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1168,
+        -704
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Construire URL LeBonCoin pour scraping (offres actives uniquement)\nconst data = $input.first().json;\n\n// Utiliser la search_query préparée (référence OU mots-clés)\nconst searchQuery = encodeURIComponent(data.search_query);\n\n// URL SIMPLIFIÉE pour offres ACTIVES\n// Format réel LBC: https://www.leboncoin.fr/recherche?text=dewalt\nconst urlActive = `https://www.leboncoin.fr/recherche?text=${searchQuery}`;\n\nreturn {\n  json: {\n    lot_id: data.lot_id,\n    titre: data.titre,\n    marque_detectee: data.marque_detectee,\n    reference_extraite: data.reference_extraite,\n    search_query: data.search_query,\n    search_type: data.search_type,\n    prix_interencheres: data.prix_interencheres,\n    url_interencheres: data.url_interencheres,\n    lbc_url_active: urlActive\n  }\n};"
+      },
+      "id": "f54a0598-b03c-488a-ad80-e95dc238adc6",
+      "name": "Construire URL LBC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        -560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.leboncoin.fr/api/adfinder/v1/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "api_key",
+              "value": "ba0c2dad52b3ec"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"limit\": 35,\n  \"limit_alu\": 3,\n  \"filters\": {\n    \"keywords\": {\n      \"text\": $json.search_query\n    }\n  }\n} }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "1901f49c-bf04-4df1-a2ca-c6d93d3a89cc",
+      "name": "API LeBonCoin",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1712,
+        -544
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extraire prix depuis l'API LeBonCoin\nconst data = $input.first().json;\nconst originalData = $('Construire URL LBC').first().json;\n\n// Extraire les annonces de la réponse API\nconst ads = data.ads || [];\n\n// Extraire les prix\nconst prices = ads\n  .map(ad => {\n    // L'API retourne le prix dans ad.price[0]\n    const price = ad.price?.[0];\n    return price;\n  })\n  .filter(price => price && price > 0 && price < 50000);\n\n// Calculer stats\nlet prix_lbc_min = null;\nlet prix_lbc_max = null;\nlet prix_lbc_moyen = null;\nlet prix_lbc_median = null;\nconst nb_annonces_actives = prices.length;\nconst nb_annonces_vendues = 0;\nconst nb_annonces_total = prices.length;\n\nif (prices.length > 0) {\n  const sorted = prices.sort((a, b) => a - b);\n  \n  prix_lbc_min = sorted[0];\n  prix_lbc_max = sorted[sorted.length - 1];\n  prix_lbc_moyen = Math.round(sorted.reduce((sum, p) => sum + p, 0) / sorted.length);\n  \n  const mid = Math.floor(sorted.length / 2);\n  prix_lbc_median = sorted.length % 2 === 0 \n    ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)\n    : sorted[mid];\n}\n\n// Calculer opportunité et ROI\nconst prixEstime = prix_lbc_median || prix_lbc_moyen;\nconst prixAchat = originalData.prix_interencheres || 0;\n\nlet opportunite_estimee = null;\nlet roi_estime = null;\n\nif (prixEstime && prixAchat > 0) {\n  opportunite_estimee = prixEstime - prixAchat;\n  roi_estime = Math.round(((prixEstime - prixAchat) / prixAchat) * 100);\n}\n\nreturn {\n  json: {\n    lot_id: originalData.lot_id,\n    reference_extraite: originalData.reference_extraite,\n    search_query_auto: originalData.search_query_auto || null,\n    search_query: originalData.search_query,\n    search_type: originalData.search_type,\n    prix_lbc_min: prix_lbc_min,\n    prix_lbc_max: prix_lbc_max,\n    prix_lbc_moyen: prix_lbc_moyen,\n    prix_lbc_median: prix_lbc_median,\n    nb_annonces_actives: nb_annonces_actives,\n    nb_annonces_vendues: nb_annonces_vendues,\n    nb_annonces_total: nb_annonces_total,\n    opportunite_estimee: opportunite_estimee,\n    roi_estime: roi_estime,\n    date_estimation: new Date().toISOString()\n  }\n};"
+      },
+      "id": "eea5f699-d3d0-4e98-b232-21e61948743a",
+      "name": "Extraire Prix & Calculer Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1904,
+        -704
       ]
     },
     {
@@ -146,13 +188,14 @@
         "operation": "appendOrUpdate",
         "documentId": {
           "__rl": true,
-          "value": "={{ $env.GOOGLE_SHEET_ID }}",
+          "value": "=1aXhXYEybgfXURg2QYduYL61dSPv4WPPqzp4hfgPpGNo",
           "mode": "id"
         },
         "sheetName": {
           "__rl": true,
-          "value": "Scanner Interencheres",
-          "mode": "name"
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Produits"
         },
         "columns": {
           "mappingMode": "autoMapInputData",
@@ -166,6 +209,38 @@
               "required": false,
               "defaultMatch": true,
               "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "reference_extraite",
+              "displayName": "Référence",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "string"
+            },
+            {
+              "id": "search_query_auto",
+              "displayName": "Requête Auto",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "string"
+            },
+            {
+              "id": "search_query",
+              "displayName": "Requête IA (utilisée)",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "string"
+            },
+            {
+              "id": "search_type",
+              "displayName": "Type Recherche",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
               "type": "string"
             },
             {
@@ -193,8 +268,32 @@
               "type": "number"
             },
             {
-              "id": "nb_annonces_lbc",
-              "displayName": "Nb Annonces LBC",
+              "id": "prix_lbc_median",
+              "displayName": "Prix LBC Médian",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "number"
+            },
+            {
+              "id": "nb_annonces_actives",
+              "displayName": "Nb Actives",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "number"
+            },
+            {
+              "id": "nb_annonces_vendues",
+              "displayName": "Nb Vendues",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "number"
+            },
+            {
+              "id": "nb_annonces_total",
+              "displayName": "Nb Total",
               "required": false,
               "defaultMatch": false,
               "canBeUsedToMatch": false,
@@ -203,6 +302,14 @@
             {
               "id": "opportunite_estimee",
               "displayName": "Opportunité €",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "number"
+            },
+            {
+              "id": "roi_estime",
+              "displayName": "ROI %",
               "required": false,
               "defaultMatch": false,
               "canBeUsedToMatch": false,
@@ -220,13 +327,13 @@
         },
         "options": {}
       },
-      "id": "12ff159c-7f2f-411d-a906-0abeb411af98",
+      "id": "f88c4c91-901e-4182-b6ab-a91588e62d3e",
       "name": "Mettre à jour Google Sheets",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
       "position": [
-        1296,
-        -16
+        2096,
+        -496
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -237,14 +344,29 @@
     },
     {
       "parameters": {},
-      "id": "fb30d2f3-ea63-4e77-819d-2ed371fdff46",
+      "id": "b6801801-38f6-4eab-8a13-98734138f011",
       "name": "Retour au split",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        1296,
-        176
+        2096,
+        -304
       ]
+    },
+    {
+      "parameters": {
+        "content": "## Ajout d'un LLM pour refacto le titre et faire une recherche leboncoin propre. pour l'instant non fonctionnell\n",
+        "height": 288,
+        "width": 400
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        416,
+        -928
+      ],
+      "id": "cb91284c-21a2-4213-885f-936447f1ecb3",
+      "name": "Sticky Note"
     }
   ],
   "connections": {
@@ -263,14 +385,36 @@
       "main": [
         [
           {
-            "node": "Filtrer produits à estimer",
+            "node": "Extraire Référence Produit",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Filtrer produits à estimer": {
+    "Extraire Référence Produit": {
+      "main": [
+        [
+          {
+            "node": "Optimiser Titre avec IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Optimiser Titre avec IA": {
+      "main": [
+        [
+          {
+            "node": "Traiter Réponse IA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traiter Réponse IA": {
       "main": [
         [
           {
@@ -283,38 +427,28 @@
     },
     "Traiter un par un": {
       "main": [
+        [],
         [
           {
-            "node": "Construire URL LeBonCoin",
+            "node": "Construire URL LBC",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Construire URL LeBonCoin": {
+    "API LeBonCoin": {
       "main": [
         [
           {
-            "node": "Scraper LeBonCoin",
+            "node": "Extraire Prix & Calculer Stats",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Scraper LeBonCoin": {
-      "main": [
-        [
-          {
-            "node": "Extraire prix LeBonCoin",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Extraire prix LeBonCoin": {
+    "Extraire Prix & Calculer Stats": {
       "main": [
         [
           {
