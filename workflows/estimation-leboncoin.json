@@ -1,5 +1,4 @@
 {
-  "name": "Estimation LeBonCoin - Valeur Marché",
   "nodes": [
     {
       "parameters": {
@@ -12,39 +11,50 @@
           ]
         }
       },
-      "id": "schedule-trigger-estimation",
+      "id": "b4bad458-519d-4d47-aab2-e499d35c0cad",
       "name": "Toutes les 2h",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
-      "position": [250, 300]
+      "position": [
+        -176,
+        -16
+      ]
     },
     {
       "parameters": {
-        "operation": "read",
         "documentId": {
           "__rl": true,
-          "value": "={{ $env.GOOGLE_SHEET_ID }}",
+          "value": "=1aXhXYEybgfXURg2QYduYL61dSPv4WPPqzp4hfgPpGNo",
           "mode": "id"
         },
         "sheetName": {
           "__rl": true,
-          "value": "Scanner Interencheres",
-          "mode": "name"
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Produits",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1aXhXYEybgfXURg2QYduYL61dSPv4WPPqzp4hfgPpGNo/edit#gid=0"
         },
-        "options": {
-          "rangeDefinition": "specifyRange",
-          "range": "A:N"
-        }
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "etat"
+            }
+          ]
+        },
+        "options": {}
       },
-      "id": "google-sheets-read",
+      "id": "4783fc9b-fbde-4aaa-9ef5-0c3fd6e5d382",
       "name": "Lire Google Sheets",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
-      "position": [460, 300],
+      "position": [
+        48,
+        -16
+      ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "google-sheets-credentials",
-          "name": "Google Sheets FlipFinder"
+          "id": "d3kN50qNoDv0C9y2",
+          "name": "Google Sheets account"
         }
       }
     },
@@ -52,34 +62,42 @@
       "parameters": {
         "jsCode": "// Filtrer uniquement les produits sans estimation LeBonCoin\nconst items = $input.all();\nconst toEstimate = [];\n\nfor (const item of items) {\n  const data = item.json;\n  \n  // Ne traiter que les lots avec marque détectée et sans estimation existante\n  if (data.marque_detectee && \n      data.marque_detectee !== '' && \n      (!data.prix_lbc_min || data.prix_lbc_min === '')) {\n    toEstimate.push({\n      json: {\n        lot_id: data.lot_id,\n        titre: data.titre,\n        marque_detectee: data.marque_detectee,\n        prix_interencheres: data.prix,\n        url_interencheres: data.url\n      }\n    });\n  }\n}\n\nreturn toEstimate.length > 0 ? toEstimate : [];"
       },
-      "id": "code-filter-to-estimate",
+      "id": "de7b999b-f47f-4a8e-8ee4-7e93e5bc199d",
       "name": "Filtrer produits à estimer",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [670, 300]
+      "position": [
+        256,
+        -16
+      ]
     },
     {
       "parameters": {
-        "batchSize": 1,
         "options": {
           "reset": false
         }
       },
-      "id": "split-in-batches",
+      "id": "8d48a70d-a054-4082-a266-ff3c011f5cbf",
       "name": "Traiter un par un",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [880, 300]
+      "position": [
+        464,
+        -16
+      ]
     },
     {
       "parameters": {
         "jsCode": "// Construire URL de recherche LeBonCoin\nconst data = $input.first().json;\nconst searchQuery = encodeURIComponent(data.titre);\n\n// URL LeBonCoin avec paramètres de recherche\nconst lbcUrl = `https://www.leboncoin.fr/recherche?text=${searchQuery}&category=15&owner_type=all&sort=time&order=desc`;\n\nreturn {\n  json: {\n    ...data,\n    lbc_search_url: lbcUrl\n  }\n};"
       },
-      "id": "code-build-lbc-url",
+      "id": "64b55479-cc95-4747-8c3f-f46049ed62c4",
       "name": "Construire URL LeBonCoin",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1090, 300]
+      "position": [
+        672,
+        -16
+      ]
     },
     {
       "parameters": {
@@ -101,21 +119,27 @@
           "timeout": 90000
         }
       },
-      "id": "http-request-leboncoin",
+      "id": "eff09e4a-671e-4c03-84c0-19969fc35999",
       "name": "Scraper LeBonCoin",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1300, 300]
+      "position": [
+        880,
+        -16
+      ]
     },
     {
       "parameters": {
         "jsCode": "// Extraire les prix des annonces LeBonCoin\nconst currentItem = $input.first().json;\nconst html = currentItem.html || '';\n\n// Pattern pour extraire les prix LeBonCoin\n// Structure: <span data-qa-id=\"aditem_price\">150&nbsp;€</span>\nconst pricePattern = /<span[^>]*data-qa-id=\"aditem_price\"[^>]*>([\\d\\s]+)(?:&nbsp;)?€<\\/span>/gi;\n\nconst prices = [];\nlet match;\n\nwhile ((match = pricePattern.exec(html)) !== null) {\n  const priceStr = match[1].replace(/[\\s&nbsp;]/g, '');\n  const price = parseInt(priceStr);\n  if (price > 0 && price < 10000) {  // Filtrer les prix aberrants\n    prices.push(price);\n  }\n}\n\n// Calculer statistiques si on a trouvé des prix\nlet prix_lbc_min = null;\nlet prix_lbc_max = null;\nlet prix_lbc_moyen = null;\nlet nb_annonces_lbc = 0;\n\nif (prices.length > 0) {\n  prices.sort((a, b) => a - b);\n  prix_lbc_min = prices[0];\n  prix_lbc_max = prices[prices.length - 1];\n  prix_lbc_moyen = Math.round(prices.reduce((sum, p) => sum + p, 0) / prices.length);\n  nb_annonces_lbc = prices.length;\n}\n\n// Calculer l'opportunité\nlet opportunite_estimee = null;\nif (prix_lbc_moyen && currentItem.prix_interencheres) {\n  opportunite_estimee = prix_lbc_moyen - currentItem.prix_interencheres;\n}\n\nreturn {\n  json: {\n    lot_id: currentItem.lot_id,\n    prix_lbc_min,\n    prix_lbc_max,\n    prix_lbc_moyen,\n    nb_annonces_lbc,\n    opportunite_estimee,\n    date_estimation: new Date().toISOString()\n  }\n};"
       },
-      "id": "code-extract-lbc-prices",
+      "id": "70d2c715-13b3-4ca4-a186-221b4b69f7de",
       "name": "Extraire prix LeBonCoin",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1510, 300]
+      "position": [
+        1088,
+        -16
+      ]
     },
     {
       "parameters": {
@@ -132,38 +156,95 @@
         },
         "columns": {
           "mappingMode": "autoMapInputData",
-          "matchingColumns": ["lot_id"],
+          "matchingColumns": [
+            "lot_id"
+          ],
           "schema": [
-            { "id": "lot_id", "displayName": "Lot ID", "required": false, "defaultMatch": true, "canBeUsedToMatch": true, "type": "string" },
-            { "id": "prix_lbc_min", "displayName": "Prix LBC Min", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
-            { "id": "prix_lbc_max", "displayName": "Prix LBC Max", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
-            { "id": "prix_lbc_moyen", "displayName": "Prix LBC Moyen", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
-            { "id": "nb_annonces_lbc", "displayName": "Nb Annonces LBC", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
-            { "id": "opportunite_estimee", "displayName": "Opportunité €", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
-            { "id": "date_estimation", "displayName": "Date Estimation", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" }
+            {
+              "id": "lot_id",
+              "displayName": "Lot ID",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "prix_lbc_min",
+              "displayName": "Prix LBC Min",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "number"
+            },
+            {
+              "id": "prix_lbc_max",
+              "displayName": "Prix LBC Max",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "number"
+            },
+            {
+              "id": "prix_lbc_moyen",
+              "displayName": "Prix LBC Moyen",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "number"
+            },
+            {
+              "id": "nb_annonces_lbc",
+              "displayName": "Nb Annonces LBC",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "number"
+            },
+            {
+              "id": "opportunite_estimee",
+              "displayName": "Opportunité €",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "number"
+            },
+            {
+              "id": "date_estimation",
+              "displayName": "Date Estimation",
+              "required": false,
+              "defaultMatch": false,
+              "canBeUsedToMatch": false,
+              "type": "string"
+            }
           ]
         },
         "options": {}
       },
-      "id": "google-sheets-update",
+      "id": "12ff159c-7f2f-411d-a906-0abeb411af98",
       "name": "Mettre à jour Google Sheets",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
-      "position": [1720, 300],
+      "position": [
+        1296,
+        -16
+      ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "google-sheets-credentials",
-          "name": "Google Sheets FlipFinder"
+          "id": "d3kN50qNoDv0C9y2",
+          "name": "Google Sheets account"
         }
       }
     },
     {
       "parameters": {},
-      "id": "loop-back",
+      "id": "fb30d2f3-ea63-4e77-819d-2ed371fdff46",
       "name": "Retour au split",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
-      "position": [1720, 480]
+      "position": [
+        1296,
+        176
+      ]
     }
   ],
   "connections": {
@@ -267,12 +348,9 @@
       ]
     }
   },
-  "settings": {
-    "executionOrder": "v1"
-  },
-  "staticData": null,
-  "tags": [],
-  "triggerCount": 1,
-  "updatedAt": "2024-11-01T00:00:00.000Z",
-  "versionId": "1"
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "468227695e0b945022c08e5852c6051011c5ff523664bf407b41675ee39f381a"
+  }
 }
