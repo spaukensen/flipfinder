@@ -2,6 +2,26 @@
   "nodes": [
     {
       "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      },
+      "id": "37fec851-8bc4-4cc7-95a1-4a6fac9c1d98",
+      "name": "Toutes les 30min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -912,
+        320
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "=http://playwright-stealth:3001/scrape",
         "sendHeaders": true,
@@ -101,7 +121,9 @@
             "url": "={{ $json.url }}",
             "estimation_vendeur_max": "={{ $json.estimation_vendeur_max }}"
           },
-          "matchingColumns": [],
+          "matchingColumns": [
+            "lot_id"
+          ],
           "schema": [
             {
               "id": "titre",
@@ -254,7 +276,7 @@
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
       "position": [
-        352,
+        432,
         320
       ],
       "credentials": {
@@ -300,6 +322,17 @@
     }
   ],
   "connections": {
+    "Toutes les 30min": {
+      "main": [
+        [
+          {
+            "node": "Mots-clés Premium",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Scan Interencheres (Stealth)": {
       "main": [
         [
