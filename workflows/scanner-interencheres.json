@@ -1,23 +1,5 @@
 {
-  "name": "Scanner Interencheres - Outillage Pro",
   "nodes": [
-    {
-      "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "minutes",
-              "minutesInterval": 30
-            }
-          ]
-        }
-      },
-      "id": "schedule-trigger",
-      "name": "Toutes les 30min",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.1,
-      "position": [250, 300]
-    },
     {
       "parameters": {
         "method": "POST",
@@ -38,96 +20,291 @@
           "timeout": 90000
         }
       },
-      "id": "http-request-interencheres",
+      "id": "986a82d4-bab7-4a81-8cca-d9c270641730",
       "name": "Scan Interencheres (Stealth)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [670, 300]
+      "position": [
+        -480,
+        320
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const keywords = [\n  'hilti',\n  'festool',\n  'milwaukee',\n  'makita',\n  'dewalt',\n  'bosch pro',\n  'metabo',\n  'liquidation judiciaire',\n  'cessation activite',\n  'fermeture entreprise'\n];\n\nreturn keywords.map(keyword => ({ json: { keyword } }));"
+        "jsCode": "const keywords = [\n  'hilti',\n  'festool',\n  'milwaukee',\n  'makita',\n  'dewalt',\n  'bosch pro'\n];\n\nreturn keywords.map(keyword => ({ json: { keyword } }));"
       },
-      "id": "code-keywords",
+      "id": "cb4fb069-1e9a-4301-955e-f895246af6af",
       "name": "Mots-clés Premium",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [460, 300]
+      "position": [
+        -688,
+        320
+      ]
     },
     {
       "parameters": {
         "jsCode": "// Nœud de synthèse et validation des données\nconst items = $input.all();\nconst keywords = $('Mots-clés Premium').all();\nconst synthese = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const data = items[i].json;\n  \n  // Récupérer le keyword correspondant depuis le nœud \"Mots-clés Premium\"\n  const keyword = keywords[i] ? keywords[i].json.keyword : 'unknown';\n  \n  const html = data.html || data.body || '';\n  const success = data.success !== undefined ? data.success : false;\n  const cloudflareDetected = data.cloudflareDetected || false;\n  \n  // Statistiques HTML\n  const htmlLength = html.length;\n  const hasContent = htmlLength > 10000;\n  \n  // Détection de contenu réel\n  const hasLots = html.includes('class=\"lot') || html.includes('result') || html.includes('<article');\n  const hasKeyword = keyword ? html.toLowerCase().includes(keyword.toLowerCase()) : false;\n  \n  synthese.push({\n    json: {\n      keyword: keyword,\n      success,\n      cloudflareDetected,\n      htmlLength,\n      hasContent,\n      hasLots,\n      hasKeyword,\n      status: success && !cloudflareDetected && hasContent ? '✅ OK' : '⚠️ Issue',\n      html: html,  // Conserver le HTML pour le nœud suivant\n      timestamp: new Date().toISOString()\n    }\n  });\n}\n\nreturn synthese;"
       },
-      "id": "code-synthese",
+      "id": "8a5adbc7-b942-4d2a-80e2-5554f5d451d4",
       "name": "📊 Synthèse & Validation",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [775, 300]
+      "position": [
+        -288,
+        320
+      ]
     },
     {
       "parameters": {
         "jsCode": "// Extraction et scoring basé sur la vraie structure HTML Interencheres\nconst items = $input.all();\nconst allResults = [];\n\n// Patterns de détection\nconst MARQUES_PREMIUM = {\n  'hilti': 2.5,\n  'festool': 2.3,\n  'milwaukee': 2.1,\n  'makita': 2.0,\n  'dewalt': 1.9,\n  'bosch': 1.7,\n  'metabo': 1.8\n};\n\nconst SIGNAUX_LIQUIDATION = [\n  { pattern: /liquidation\\s+judiciaire/i, score: 0.3 },\n  { pattern: /cessation\\s+activit[ée]/i, score: 0.3 },\n  { pattern: /fermeture\\s+entreprise/i, score: 0.25 },\n  { pattern: /d[ée]part\\s+retraite/i, score: 0.2 },\n  { pattern: /urgent/i, score: 0.15 }\n];\n\n// Traiter chaque item (chaque keyword)\nfor (let i = 0; i < items.length; i++) {\n  const data = items[i].json;\n  const html = data.html || '';\n  const keyword = data.keyword || 'unknown';\n  \n  // Vérifier Cloudflare CHALLENGE\n  const isCloudflareChallenge = (\n    (html.includes('cf-browser-verification') && html.includes('Checking your browser')) ||\n    (html.includes('challenge-platform') && html.includes('Just a moment')) ||\n    (html.includes('Cloudflare') && html.length < 5000)\n  );\n  \n  if (isCloudflareChallenge) {\n    allResults.push({ \n      json: { \n        error: 'Cloudflare détecté', \n        keyword, \n        html_preview: html.substring(0, 500) \n      } \n    });\n    continue;\n  }\n  \n  // EXTRACTION DES LOTS - Structure Interencheres réelle\n  // Pattern: <a href=\"/biens-equipement/.../lot-XXXXX.html\" ... id=\"XXXXX\">\n  const lotPattern = /<a[^>]*href=\"([^\"]*\\/lot-\\d+\\.html)\"[^>]*id=\"(\\d+)\"[^>]*>([\\s\\S]*?)<\\/a>/gi;\n  \n  let match;\n  let lotsFound = 0;\n  \n  while ((match = lotPattern.exec(html)) !== null) {\n    const url = 'https://www.interencheres.com' + match[1];\n    const lotId = match[2];\n    const lotContent = match[3];\n    \n    // Extraction titre - <div class=\"title text-subtitle-2 font-weight-bold white--text\">\n    const titreMatch = /<div[^>]*class=\"[^\"]*title[^\"]*text-subtitle-2[^\"]*\"[^>]*>\\s*<div[^>]*>([^<]+)<\\/div>/i.exec(lotContent);\n    if (!titreMatch) continue;\n    \n    const titre = titreMatch[1].trim();\n    \n    // Extraction estimation du vendeur (optionnelle)\n    let estimation_vendeur_min = null;\n    let estimation_vendeur_max = null;\n    const estimationVendeurMatch = /Estimation\\s*:\\s*<\\/span>\\s*<span[^>]*>(\\d+)(?:&nbsp;)?\\s*€\\s*-\\s*(\\d+)(?:&nbsp;)?\\s*€/i.exec(lotContent);\n    if (estimationVendeurMatch) {\n      estimation_vendeur_min = parseInt(estimationVendeurMatch[1]);\n      estimation_vendeur_max = parseInt(estimationVendeurMatch[2]);\n    }\n\n    // Extraction prix - Mise à prix\n    let prix = 0;\n    const miseAPrixMatch = /Mise\\s+à\\s+prix\\s*:\\s*<\\/span>\\s*<span[^>]*>(\\d+)(?:&nbsp;)?\\s*€/i.exec(lotContent);\n    if (miseAPrixMatch) {\n      prix = parseInt(miseAPrixMatch[1]);\n    } else if (estimation_vendeur_min) {\n      // Si pas de mise à prix, utiliser l'estimation min comme référence\n      prix = estimation_vendeur_min;\n    }\n    \n    // Calcul du score\n    let score = 0;\n    let marque_detectee = null;\n    let multiplicateur = 1;\n    \n    // Détection marque\n    for (const [marque, mult] of Object.entries(MARQUES_PREMIUM)) {\n      if (titre.toLowerCase().includes(marque)) {\n        marque_detectee = marque;\n        multiplicateur = mult;\n        score += 0.4;\n        break;\n      }\n    }\n    \n    // Détection signaux liquidation\n    for (const signal of SIGNAUX_LIQUIDATION) {\n      if (signal.pattern.test(titre)) {\n        score += signal.score;\n      }\n    }\n    \n    // Score prix (plus c'est bas, mieux c'est)\n    if (prix > 0 && prix < 100) score += 0.3;\n    else if (prix < 200) score += 0.2;\n    else if (prix < 500) score += 0.1;\n    \n    // Estimation ROI\n    const valeur_estimee = Math.round(prix * multiplicateur);\n    const roi_estime = Math.round((multiplicateur - 1) * 100) / 100;\n    \n    // Conserver tous les lots avec score > 0.3 (pas juste 0.5)\n    if (score > 0.3) {\n      allResults.push({\n        json: {\n          titre,\n          prix,\n          estimation_vendeur_min,\n          estimation_vendeur_max,\n          url,\n          lot_id: lotId,\n          keyword,\n          score: Math.round(score * 100) / 100,\n          marque_detectee,\n          multiplicateur,\n          valeur_estimee,\n          roi_estime,\n          statut: 'DETECTE',\n          date_detection: new Date().toISOString()\n        }\n      });\n      lotsFound++;\n    }\n  }\n  \n  // Si aucun résultat trouvé pour ce keyword\n  if (lotsFound === 0) {\n    allResults.push({ \n      json: { \n        message: 'Aucun lot trouvé', \n        keyword, \n        html_length: html.length,\n        has_autoqa_class: html.includes('autoqa-sale-details-item'),\n        has_lot_links: html.includes('/lot-')\n      } \n    });\n  }\n}\n\nreturn allResults.length > 0 ? allResults : [{ json: { message: 'Aucun item traité' } }];"
       },
-      "id": "code-scoring",
+      "id": "e4798610-8126-4812-ba7f-9c2cb7e9a4fd",
       "name": "Extraction + Scoring",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [985, 300]
+      "position": [
+        -64,
+        320
+      ]
     },
     {
       "parameters": {
         "operation": "appendOrUpdate",
         "documentId": {
           "__rl": true,
-          "value": "={{ $env.GOOGLE_SHEET_ID }}",
+          "value": "1aXhXYEybgfXURg2QYduYL61dSPv4WPPqzp4hfgPpGNo",
           "mode": "id"
         },
         "sheetName": {
           "__rl": true,
-          "value": "Scanner Interencheres",
-          "mode": "name"
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Produits",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1aXhXYEybgfXURg2QYduYL61dSPv4WPPqzp4hfgPpGNo/edit#gid=0"
         },
         "columns": {
-          "mappingMode": "autoMapInputData",
-          "matchingColumns": ["lot_id"],
+          "mappingMode": "defineBelow",
+          "value": {
+            "titre": "={{ $json.titre }}",
+            "prix": "={{ $json.prix }}",
+            "estimation_vendeur_min": "={{ $json.estimation_vendeur_min }}",
+            "date_detection": "={{ $json.date_detection }}",
+            "statut": "={{ $json.statut }}",
+            "roi_estime": "={{ $json.roi_estime }}",
+            "valeur_estimee": "={{ $json.valeur_estimee }}",
+            "multiplicateur": "={{ $json.multiplicateur }}",
+            "marque_detectee": "={{ $json.marque_detectee }}",
+            "score": "={{ $json.score }}",
+            "keyword": "={{ $json.keyword }}",
+            "lot_id": "={{ $json.lot_id }}",
+            "url": "={{ $json.url }}",
+            "estimation_vendeur_max": "={{ $json.estimation_vendeur_max }}"
+          },
+          "matchingColumns": [],
           "schema": [
-            { "id": "titre", "displayName": "Titre", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" },
-            { "id": "prix", "displayName": "Prix", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
-            { "id": "estimation_vendeur_min", "displayName": "Estimation Min", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
-            { "id": "estimation_vendeur_max", "displayName": "Estimation Max", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
-            { "id": "url", "displayName": "URL", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" },
-            { "id": "lot_id", "displayName": "Lot ID", "required": false, "defaultMatch": true, "canBeUsedToMatch": true, "type": "string" },
-            { "id": "keyword", "displayName": "Keyword", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" },
-            { "id": "score", "displayName": "Score", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
-            { "id": "marque_detectee", "displayName": "Marque", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" },
-            { "id": "multiplicateur", "displayName": "Multiplicateur", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
-            { "id": "valeur_estimee", "displayName": "Valeur Estimée", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
-            { "id": "roi_estime", "displayName": "ROI Estimé", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "number" },
-            { "id": "statut", "displayName": "Statut", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" },
-            { "id": "date_detection", "displayName": "Date Détection", "required": false, "defaultMatch": false, "canBeUsedToMatch": false, "type": "string" }
-          ]
+            {
+              "id": "titre",
+              "displayName": "titre",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "prix",
+              "displayName": "prix",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "estimation_vendeur_min",
+              "displayName": "estimation_vendeur_min",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "estimation_vendeur_max",
+              "displayName": "estimation_vendeur_max",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "lot_id",
+              "displayName": "lot_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "keyword",
+              "displayName": "keyword",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "marque_detectee",
+              "displayName": "marque_detectee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "multiplicateur",
+              "displayName": "multiplicateur",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "valeur_estimee",
+              "displayName": "valeur_estimee",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "roi_estime",
+              "displayName": "roi_estime",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "statut",
+              "displayName": "statut",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "date_detection",
+              "displayName": "date_detection",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
         },
         "options": {}
       },
-      "id": "google-sheets-append",
+      "id": "42fedbdc-baa0-4a6c-b2de-c91fc1da264e",
       "name": "Sauvegarder dans Google Sheets",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.4,
-      "position": [1195, 300],
+      "position": [
+        352,
+        320
+      ],
       "credentials": {
         "googleSheetsOAuth2Api": {
-          "id": "google-sheets-credentials",
-          "name": "Google Sheets FlipFinder"
+          "id": "d3kN50qNoDv0C9y2",
+          "name": "Google Sheets account"
         }
       }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1944bce7-68d4-41e4-b27f-e367da8602c0",
+              "leftValue": "={{ $json.titre }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        144,
+        320
+      ],
+      "id": "f97021f6-672f-4a2a-a76e-3b140d0ab211",
+      "name": "Filter"
     }
   ],
   "connections": {
-    "Toutes les 30min": {
+    "Scan Interencheres (Stealth)": {
       "main": [
         [
           {
-            "node": "Mots-clés Premium",
+            "node": "📊 Synthèse & Validation",
             "type": "main",
             "index": 0
           }
@@ -139,17 +316,6 @@
         [
           {
             "node": "Scan Interencheres (Stealth)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Scan Interencheres (Stealth)": {
-      "main": [
-        [
-          {
-            "node": "📊 Synthèse & Validation",
             "type": "main",
             "index": 0
           }
@@ -171,6 +337,17 @@
       "main": [
         [
           {
+            "node": "Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
             "node": "Sauvegarder dans Google Sheets",
             "type": "main",
             "index": 0
@@ -179,12 +356,9 @@
       ]
     }
   },
-  "settings": {
-    "executionOrder": "v1"
-  },
-  "staticData": null,
-  "tags": [],
-  "triggerCount": 1,
-  "updatedAt": "2024-10-31T00:00:00.000Z",
-  "versionId": "1"
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "468227695e0b945022c08e5852c6051011c5ff523664bf407b41675ee39f381a"
+  }
 }
