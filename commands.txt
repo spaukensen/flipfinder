@@ -1,1 +1,2 @@
 # Init projet
+docker ps | grep ollama
