@@ -82,11 +82,11 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - 'curl -f http://localhost:11434/api/tags || exit 1'
+        - 'curl -f http://localhost:11434/ || exit 1'
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 60s
   meilisearch:
     image: 'getmeili/meilisearch:v1.6'
     container_name: outillage_meilisearch
