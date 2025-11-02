@@ -77,7 +77,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Extraction basée sur la structure HTML Interencheres\nconst items = $input.all();\nconst allResults = [];\n\n// Liste des marques premium pour détection\nconst MARQUES_PREMIUM = ['hilti', 'festool', 'milwaukee', 'makita', 'dewalt', 'bosch', 'metabo'];\n\n// Traiter chaque item (chaque keyword)\nfor (let i = 0; i < items.length; i++) {\n  const data = items[i].json;\n  const html = data.html || '';\n  const keyword = data.keyword || 'unknown';\n  \n  // Vérifier Cloudflare CHALLENGE\n  const isCloudflareChallenge = (\n    (html.includes('cf-browser-verification') && html.includes('Checking your browser')) ||\n    (html.includes('challenge-platform') && html.includes('Just a moment')) ||\n    (html.includes('Cloudflare') && html.length < 5000)\n  );\n  \n  if (isCloudflareChallenge) {\n    allResults.push({ \n      json: { \n        error: 'Cloudflare détecté', \n        keyword, \n        html_preview: html.substring(0, 500) \n      } \n    });\n    continue;\n  }\n  \n  // EXTRACTION DES LOTS - Structure Interencheres réelle\n  const lotPattern = /<a[^>]*href=\"([^\"]*\\/lot-\\d+\\.html)\"[^>]*id=\"(\\d+)\"[^>]*>([\\s\\S]*?)<\\/a>/gi;\n  \n  let match;\n  let lotsFound = 0;\n  \n  while ((match = lotPattern.exec(html)) !== null) {\n    const url = 'https://www.interencheres.com' + match[1];\n    const lotId = match[2];\n    const lotContent = match[3];\n    \n    // Extraction titre\n    const titreMatch = /<div[^>]*class=\"[^\"]*title[^\"]*text-subtitle-2[^\"]*\"[^>]*>\\s*<div[^>]*>([^<]+)<\\/div>/i.exec(lotContent);\n    if (!titreMatch) continue;\n    \n    const titre = titreMatch[1].trim();\n    \n    // Extraction estimation du vendeur (optionnelle)\n    let estimation_vendeur_min = null;\n    let estimation_vendeur_max = null;\n    const estimationVendeurMatch = /Estimation\\s*:\\s*<\\/span>\\s*<span[^>]*>(\\d+)(?:&nbsp;)?\\s*€\\s*-\\s*(\\d+)(?:&nbsp;)?\\s*€/i.exec(lotContent);\n    if (estimationVendeurMatch) {\n      estimation_vendeur_min = parseInt(estimationVendeurMatch[1]);\n      estimation_vendeur_max = parseInt(estimationVendeurMatch[2]);\n    }\n\n    // Extraction prix - Mise à prix\n    let prix = 0;\n    const miseAPrixMatch = /Mise\\s+à\\s+prix\\s*:\\s*<\\/span>\\s*<span[^>]*>(\\d+)(?:&nbsp;)?\\s*€/i.exec(lotContent);\n    if (miseAPrixMatch) {\n      prix = parseInt(miseAPrixMatch[1]);\n    } else if (estimation_vendeur_min) {\n      prix = estimation_vendeur_min;\n    }\n    \n    // Détection marque uniquement\n    let marque_detectee = null;\n    for (const marque of MARQUES_PREMIUM) {\n      if (titre.toLowerCase().includes(marque)) {\n        marque_detectee = marque;\n        break;\n      }\n    }\n\n    // Ajouter le lot (pas de filtrage)\n    allResults.push({\n      json: {\n        titre,\n        prix,\n        estimation_vendeur_min,\n        estimation_vendeur_max,\n        url,\n        lot_id: lotId,\n        keyword,\n        marque_detectee,\n        date_detection: new Date().toISOString()\n      }\n    });\n    lotsFound++;\n  }\n  \n  // Si aucun résultat trouvé pour ce keyword\n  if (lotsFound === 0) {\n    allResults.push({ \n      json: { \n        message: 'Aucun lot trouvé', \n        keyword, \n        html_length: html.length,\n        has_autoqa_class: html.includes('autoqa-sale-details-item'),\n        has_lot_links: html.includes('/lot-')\n      } \n    });\n  }\n}\n\nreturn allResults.length > 0 ? allResults : [{ json: { message: 'Aucun item traité' } }];"
+        "jsCode": "// Code d'extraction avec DATE DE VENTE\nconst items = $input.all();\nconst allResults = [];\n\nconst MARQUES_PREMIUM = ['hilti', 'festool', 'milwaukee', 'makita', 'dewalt', 'bosch', 'metabo'];\n\nfor (let i = 0; i < items.length; i++) {\n  const data = items[i].json;\n  const html = data.html || '';\n  const keyword = data.keyword || 'unknown';\n\n  const isCloudflareChallenge = (\n    (html.includes('cf-browser-verification') && html.includes('Checking your browser')) ||\n    (html.includes('challenge-platform') && html.includes('Just a moment')) ||\n    (html.includes('Cloudflare') && html.length < 5000)\n  );\n\n  if (isCloudflareChallenge) {\n    allResults.push({\n      json: {\n        error: 'Cloudflare détecté',\n        keyword,\n        html_preview: html.substring(0, 500)\n      }\n    });\n    continue;\n  }\n\n  // Extraction des produits\n  const lotLinkPattern = /<a[^>]+href=\"([^\"]*)\"[^>]+id=\"(\\d+)\"/gi;\n  let match;\n  let lotsFound = 0;\n\n  while ((match = lotLinkPattern.exec(html)) !== null) {\n    const href = match[1];\n    const lotId = match[2];\n\n    if (!href.includes('/lot-')) continue;\n\n    const url = href.startsWith('http') ? href : 'https://www.interencheres.com' + href;\n\n    // Bloc étendu pour capturer le contenu complet (y compris la date dans la div \"bottom\")\n    const blockStart = match.index;\n    const blockEnd = html.indexOf('</a>', blockStart);\n    if (blockEnd === -1) continue;\n\n    // On prend un bloc plus large pour capturer la date qui est dans la div \"bottom\"\n    const lotContent = html.substring(blockStart, blockEnd + 4);\n\n    // Extraction titre\n    const titreMatch = /<div[^>]*class=\"[^\"]*title[^\"]*text-subtitle-2[^\"]*\"[^>]*>\\s*<div[^>]*>([^<]+)<\\/div>/i.exec(lotContent);\n    if (!titreMatch) continue;\n\n    const titre = titreMatch[1].trim().replace(/…$/, '');\n\n    // Extraction date de vente (dans la div \"bottom\" > \"text-caption font-weight-medium\" > span)\n    let date_vente = null;\n    const dateMatch = /<div[^>]*class=\"[^\"]*bottom[^\"]*\"[^>]*>[\\s\\S]*?<span[^>]*>(\\d{2}\\/\\d{2}\\/\\d{4})<\\/span>/i.exec(lotContent);\n    if (dateMatch) {\n      date_vente = dateMatch[1];\n    }\n\n    // Extraction estimation\n    let estimation_vendeur_min = null;\n    let estimation_vendeur_max = null;\n    const estimationMatch = /Estimation\\s*:\\s*<\\/span>\\s*<span[^>]*>(\\d+)(?:&nbsp;|\\s)*€\\s*-\\s*(\\d+)(?:&nbsp;|\\s)*€/i.exec(lotContent);\n    if (estimationMatch) {\n      estimation_vendeur_min = parseInt(estimationMatch[1]);\n      estimation_vendeur_max = parseInt(estimationMatch[2]);\n    }\n\n    // Extraction prix\n    let prix = 0;\n    const miseAPrixMatch = /Mise\\s+à\\s+prix\\s*:\\s*<\\/span>\\s*<span[^>]*>(\\d+)(?:&nbsp;|\\s)*€/i.exec(lotContent);\n    const enchereMatch = /Enchère\\s+en\\s+cours\\s*<\\/span>\\s*:\\s*<span[^>]*>(\\d+)(?:&nbsp;|\\s)*€/i.exec(lotContent);\n\n    if (enchereMatch) {\n      prix = parseInt(enchereMatch[1]);\n    } else if (miseAPrixMatch) {\n      prix = parseInt(miseAPrixMatch[1]);\n    } else if (estimation_vendeur_min) {\n      prix = estimation_vendeur_min;\n    }\n\n    // Détection marque\n    let marque_detectee = null;\n    const titreLower = titre.toLowerCase();\n    for (const marque of MARQUES_PREMIUM) {\n      if (titreLower.includes(marque)) {\n        marque_detectee = marque;\n        break;\n      }\n    }\n\n    allResults.push({\n      json: {\n        titre,\n        prix,\n        estimation_vendeur_min,\n        estimation_vendeur_max,\n        url,\n        lot_id: lotId,\n        keyword,\n        marque_detectee,\n        date_vente,\n        date_detection: new Date().toISOString()\n      }\n    });\n    lotsFound++;\n  }\n\n  console.log(`${lotsFound > 0 ? '✅' : '❌'} ${lotsFound} lots extraits pour \"${keyword}\" (dates: ${allResults.filter(r => r.json.date_vente).length})`);\n}\n\nreturn allResults.length > 0 ? allResults : [{ json: { message: 'Aucun lot extrait' } }];"
       },
       "id": "fd15bf8b-cbb1-4f09-8c7c-029938a5f381",
       "name": "Extraction + Scoring",
@@ -87,6 +87,33 @@
         352,
         320
       ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1aXhXYEybgfXURg2QYduYL61dSPv4WPPqzp4hfgPpGNo",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Produits"
+        },
+        "options": {}
+      },
+      "id": "read-existing-data",
+      "name": "📖 Lire Sheet Existant",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [560, 160],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "d3kN50qNoDv0C9y2",
+          "name": "Google Sheets account"
+        }
+      }
     },
     {
       "parameters": {
@@ -114,6 +141,7 @@
             "lot_id": "={{ $json.lot_id }}",
             "keyword": "={{ $json.keyword }}",
             "marque_detectee": "={{ $json.marque_detectee }}",
+            "date_vente": "={{ $json.date_vente }}",
             "date_detection": "={{ $json.date_detection }}"
           },
           "matchingColumns": [
@@ -193,6 +221,15 @@
               "canBeUsedToMatch": true
             },
             {
+              "id": "date_vente",
+              "displayName": "date_vente",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
               "id": "date_detection",
               "displayName": "date_detection",
               "required": false,
@@ -255,6 +292,69 @@
       ],
       "id": "94f21063-5130-426d-a8fa-d453f7718a27",
       "name": "Filter"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compter les lot_id avant et après sauvegarde (approche simplifiée)\nconst itemsAvant = $('📖 Lire Sheet Existant').all();\nconst itemsApres = $input.all(); // Vient de \"Sauvegarder dans Google Sheets\"\n\nconst countAvant = itemsAvant.length;\nconst countApres = itemsApres.length;\nconst nouveauxProduits = countApres - countAvant;\n\n// Logs de debug\nconsole.log('=== DÉTECTION NOUVEAUX PRODUITS ===');\nconsole.log('Lot IDs AVANT sauvegarde:', countAvant);\nconsole.log('Lot IDs APRÈS sauvegarde:', countApres);\nconsole.log('Nouveaux produits détectés:', nouveauxProduits);\n\n// Calculer stats sur TOUS les produits (simplifié)\nconst marques = {};\nlet prixTotal = 0;\nlet prixCount = 0;\nlet prixMin = Infinity;\nlet prixMax = 0;\nconst keywordsSet = new Set();\n\nfor (const item of itemsApres) {\n  const data = item.json;\n  \n  // Compter les marques\n  if (data.marque_detectee) {\n    marques[data.marque_detectee] = (marques[data.marque_detectee] || 0) + 1;\n  }\n  \n  // Calculer stats de prix\n  if (data.prix && data.prix > 0) {\n    prixTotal += data.prix;\n    prixCount++;\n    prixMin = Math.min(prixMin, data.prix);\n    prixMax = Math.max(prixMax, data.prix);\n  }\n  \n  // Collecter keywords\n  if (data.keyword) {\n    keywordsSet.add(data.keyword);\n  }\n}\n\nconst prix_moyen = prixCount > 0 ? Math.round(prixTotal / prixCount) : 0;\n\nreturn [{\n  json: {\n    total_produits: countApres,\n    nouveaux_produits: nouveauxProduits,\n    produits_existants: countAvant,\n    marques: marques,\n    prix_moyen: prix_moyen,\n    prix_min: prixMin === Infinity ? 0 : prixMin,\n    prix_max: prixMax,\n    keywords_scanned: Array.from(keywordsSet),\n    timestamp: new Date().toISOString(),\n    google_sheet_url: 'https://docs.google.com/spreadsheets/d/1aXhXYEybgfXURg2QYduYL61dSPv4WPPqzp4hfgPpGNo/edit#gid=0'\n  }\n}];"
+      },
+      "id": "calc-stats",
+      "name": "📊 Calculer Statistiques",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1056, 320]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "filter-nouveaux",
+              "leftValue": "={{ $json.nouveaux_produits }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [1264, 320],
+      "id": "filter-has-new-products",
+      "name": "🔍 Nouveaux produits ?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/webhooks/1434620214611415161/1Bj9YnyI-gDnvtXhB5s4PpMh6EkkPdjKSdVq_b4Ek-2vC02xjpGAPemUoIxah6WpZFRe",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"embeds\": [{\n    \"title\": \"🎉 Nouveaux Produits Détectés !\",\n    \"description\": \"Le scan a trouvé **\" + $json.nouveaux_produits + \" nouveau(x) produit(s)** sur Interenchères !\",\n    \"color\": 3066993,\n    \"fields\": [\n      {\n        \"name\": \"✨ Nouveaux produits\",\n        \"value\": $json.nouveaux_produits + \" produits\",\n        \"inline\": true\n      },\n      {\n        \"name\": \"📦 Total scannés\",\n        \"value\": $json.total_produits + \" produits\",\n        \"inline\": true\n      },\n      {\n        \"name\": \"📊 Déjà connus\",\n        \"value\": $json.produits_existants + \" produits\",\n        \"inline\": true\n      },\n      {\n        \"name\": \"💰 Prix moyen (nouveaux)\",\n        \"value\": $json.prix_moyen + \"€\",\n        \"inline\": true\n      },\n      {\n        \"name\": \"📊 Fourchette\",\n        \"value\": $json.prix_min + \"€ - \" + $json.prix_max + \"€\",\n        \"inline\": true\n      },\n      {\n        \"name\": \"⏰ Scan à\",\n        \"value\": new Date($json.timestamp).toLocaleString('fr-FR', {hour: '2-digit', minute: '2-digit'}),\n        \"inline\": true\n      },\n      {\n        \"name\": \"🏷️ Marques détectées (nouveaux)\",\n        \"value\": Object.keys($json.marques).length > 0 ? Object.keys($json.marques).map(m => m + ': ' + $json.marques[m]).join('\\\\n') : 'Aucune',\n        \"inline\": false\n      },\n      {\n        \"name\": \"🔎 Mots-clés scannés\",\n        \"value\": $json.keywords_scanned.join(', '),\n        \"inline\": false\n      },\n      {\n        \"name\": \"📄 Google Sheet\",\n        \"value\": \"[📊 Voir tous les résultats](\" + $json.google_sheet_url + \")\",\n        \"inline\": false\n      }\n    ],\n    \"timestamp\": $json.timestamp,\n    \"footer\": {\n      \"text\": \"FlipFinder Scanner • Scan quotidien\",\n      \"icon_url\": \"https://cdn-icons-png.flaticon.com/512/2919/2919906.png\"\n    }\n  }]\n} }}",
+        "options": {}
+      },
+      "id": "discord-notification",
+      "name": "💬 Notification Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1464, 320]
     }
   ],
   "connections": {
@@ -318,6 +418,49 @@
         [
           {
             "node": "Sauvegarder dans Google Sheets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📖 Lire Sheet Existant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📖 Lire Sheet Existant": {
+      "main": [
+        []
+      ]
+    },
+    "Sauvegarder dans Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "📊 Calculer Statistiques",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Calculer Statistiques": {
+      "main": [
+        [
+          {
+            "node": "🔍 Nouveaux produits ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Nouveaux produits ?": {
+      "main": [
+        [
+          {
+            "node": "💬 Notification Discord",
             "type": "main",
             "index": 0
           }

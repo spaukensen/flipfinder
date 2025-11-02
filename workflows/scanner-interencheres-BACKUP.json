@@ -1,0 +1,110 @@
+// Code d'extraction SIMPLE - Version qui fonctionnait avec 4 produits
+const items = $input.all();
+const allResults = [];
+
+const MARQUES_PREMIUM = ['hilti', 'festool', 'milwaukee', 'makita', 'dewalt', 'bosch', 'metabo'];
+
+for (let i = 0; i < items.length; i++) {
+  const data = items[i].json;
+  const html = data.html || '';
+  const keyword = data.keyword || 'unknown';
+
+  const isCloudflareChallenge = (
+    (html.includes('cf-browser-verification') && html.includes('Checking your browser')) ||
+    (html.includes('challenge-platform') && html.includes('Just a moment')) ||
+    (html.includes('Cloudflare') && html.length < 5000)
+  );
+
+  if (isCloudflareChallenge) {
+    allResults.push({
+      json: {
+        error: 'Cloudflare détecté',
+        keyword,
+        html_preview: html.substring(0, 500)
+      }
+    });
+    continue;
+  }
+
+  // Extraction SIMPLE
+  const lotLinkPattern = /<a[^>]+href="([^"]*)\"[^>]+id="(\d+)"/gi;
+  let match;
+  let lotsFound = 0;
+
+  while ((match = lotLinkPattern.exec(html)) !== null) {
+    const href = match[1];
+    const lotId = match[2];
+
+    if (!href.includes('/lot-')) continue;
+
+    const url = href.startsWith('http') ? href : 'https://www.interencheres.com' + href;
+
+    // Bloc MINIMUM autour du lien
+    const blockStart = match.index;
+    const blockEnd = html.indexOf('</a>', blockStart);
+    if (blockEnd === -1) continue;
+
+    const lotContent = html.substring(blockStart, blockEnd + 4);
+
+    // Extraction titre
+    const titreMatch = /<div[^>]*class="[^"]*title[^"]*text-subtitle-2[^"]*"[^>]*>\s*<div[^>]*>([^<]+)<\/div>/i.exec(lotContent);
+    if (!titreMatch) continue;
+
+    const titre = titreMatch[1].trim().replace(/…$/, '');
+
+    // PAS d'extraction de date pour l'instant
+    const date_vente = null;
+
+    // Extraction estimation
+    let estimation_vendeur_min = null;
+    let estimation_vendeur_max = null;
+    const estimationMatch = /Estimation\s*:\s*<\/span>\s*<span[^>]*>(\d+)(?:&nbsp;|\s)*€\s*-\s*(\d+)(?:&nbsp;|\s)*€/i.exec(lotContent);
+    if (estimationMatch) {
+      estimation_vendeur_min = parseInt(estimationMatch[1]);
+      estimation_vendeur_max = parseInt(estimationMatch[2]);
+    }
+
+    // Extraction prix
+    let prix = 0;
+    const miseAPrixMatch = /Mise\s+à\s+prix\s*:\s*<\/span>\s*<span[^>]*>(\d+)(?:&nbsp;|\s)*€/i.exec(lotContent);
+    const enchereMatch = /Enchère\s+en\s+cours\s*<\/span>\s*:\s*<span[^>]*>(\d+)(?:&nbsp;|\s)*€/i.exec(lotContent);
+
+    if (enchereMatch) {
+      prix = parseInt(enchereMatch[1]);
+    } else if (miseAPrixMatch) {
+      prix = parseInt(miseAPrixMatch[1]);
+    } else if (estimation_vendeur_min) {
+      prix = estimation_vendeur_min;
+    }
+
+    // Détection marque
+    let marque_detectee = null;
+    const titreLower = titre.toLowerCase();
+    for (const marque of MARQUES_PREMIUM) {
+      if (titreLower.includes(marque)) {
+        marque_detectee = marque;
+        break;
+      }
+    }
+
+    allResults.push({
+      json: {
+        titre,
+        prix,
+        estimation_vendeur_min,
+        estimation_vendeur_max,
+        url,
+        lot_id: lotId,
+        keyword,
+        marque_detectee,
+        date_vente,
+        date_detection: new Date().toISOString()
+      }
+    });
+    lotsFound++;
+  }
+
+  console.log(`${lotsFound > 0 ? '✅' : '❌'} ${lotsFound} lots extraits pour "${keyword}"`);
+}
+
+return allResults.length > 0 ? allResults : [{ json: { message: 'Aucun lot extrait' } }];
