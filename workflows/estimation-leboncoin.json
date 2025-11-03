@@ -119,9 +119,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ {\n  \"url\": $json.lbc_url_active,\n  \"waitFor\": 5000\n} }}",
+        "jsonBody": "={{ {\n  \"url\": $json.lbc_url_active,\n  \"waitFor\": 10000,\n  \"simulateHuman\": true\n} }}",
         "options": {
-          "timeout": 90000
+          "timeout": 120000
         }
       },
       "id": "87eb23ae-d9dd-49c9-b779-4ab0d959ed89",

@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(curl:*)",
-      "Bash(docker logs:*)"
+      "Bash(docker logs:*)",
+      "Bash(git restore:*)",
+      "Bash(docker build:*)"
     ],
     "deny": [],
     "ask": []

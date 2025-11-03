@@ -89,7 +89,7 @@ async function humanScroll(page) {
 }
 
 app.post('/scrape', async (req, res) => {
-  const { url, waitFor = 3000, simulateHuman = true } = req.body;
+  const { url, waitFor = 8000, simulateHuman = true } = req.body;
 
   if (!url) {
     return res.status(400).json({ error: 'URL is required' });
@@ -101,6 +101,9 @@ app.post('/scrape', async (req, res) => {
   try {
     const browser = await getBrowser();
     const userAgent = getRandomUserAgent();
+
+    // AUGMENTATION: Délai initial aléatoire (simuler utilisateur réel)
+    await new Promise(resolve => setTimeout(resolve, randomDelay(500, 2000)));
 
     context = await browser.newContext({
       viewport: { width: 1920, height: 1080 },
@@ -235,7 +238,20 @@ app.post('/scrape', async (req, res) => {
     console.log(`[${new Date().toISOString()}] Fetching: ${url}`);
     console.log(`User-Agent: ${userAgent}`);
 
-    // Navigate with realistic timing
+    // AUGMENTATION: Simuler visite page d'accueil d'abord (anti-bot)
+    console.log('🏠 Visiting homepage first...');
+    await page.goto('https://www.leboncoin.fr', {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000
+    });
+    await page.waitForTimeout(randomDelay(3000, 5000));
+
+    // Mouvements souris sur homepage
+    await humanMouseMovement(page);
+    await page.waitForTimeout(randomDelay(1000, 2000));
+
+    // PUIS navigation vers URL cible
+    console.log(`🎯 Navigating to target: ${url}`);
     await page.goto(url, {
       waitUntil: 'domcontentloaded',
       timeout: 60000
@@ -243,8 +259,8 @@ app.post('/scrape', async (req, res) => {
 
     console.log('Page loaded, waiting for content...');
 
-    // Initial wait
-    await page.waitForTimeout(randomDelay(2000, 4000));
+    // AUGMENTATION: Attente initiale plus longue
+    await page.waitForTimeout(randomDelay(4000, 7000));
 
     // Check for DataDome challenge
     const dataDomePresent = await page.evaluate(() => {
@@ -257,22 +273,37 @@ app.post('/scrape', async (req, res) => {
     if (dataDomePresent) {
       console.log('⚠️ DataDome detected! Attempting bypass...');
 
-      // Simulate human behavior more aggressively
+      // AUGMENTATION: Comportement humain très agressif
       if (simulateHuman) {
+        // Mouvement souris multiple
         await humanMouseMovement(page);
-        await page.waitForTimeout(randomDelay(3000, 5000));
+        await page.waitForTimeout(randomDelay(2000, 4000));
 
-        // Try clicking on page
-        await page.mouse.click(500, 300);
+        // Multiple clics aléatoires
+        await page.mouse.click(randomDelay(300, 700), randomDelay(200, 400));
+        await page.waitForTimeout(randomDelay(1500, 2500));
+
+        await page.mouse.click(randomDelay(800, 1200), randomDelay(300, 500));
         await page.waitForTimeout(randomDelay(1000, 2000));
 
-        // Scroll
+        // Scrolling multiple
         await humanScroll(page);
+        await page.waitForTimeout(randomDelay(3000, 5000));
+
+        // Encore des mouvements
+        await humanMouseMovement(page);
         await page.waitForTimeout(randomDelay(2000, 3000));
+
+        // Keyboard events (simuler recherche)
+        await page.keyboard.press('Tab');
+        await page.waitForTimeout(randomDelay(500, 1000));
+        await page.keyboard.press('Tab');
+        await page.waitForTimeout(randomDelay(500, 1000));
       }
 
-      // Wait longer for challenge to complete
-      await page.waitForTimeout(10000);
+      // AUGMENTATION: Attente beaucoup plus longue (20-30 secondes)
+      console.log('⏳ Waiting 20-30 seconds for DataDome challenge...');
+      await page.waitForTimeout(randomDelay(20000, 30000));
 
       // Check again
       const stillBlocked = await page.evaluate(() => {
@@ -298,10 +329,19 @@ app.post('/scrape', async (req, res) => {
       }
     }
 
-    // Simulate human behavior
+    // AUGMENTATION: Comportement humain systématique (même sans DataDome détecté)
     if (simulateHuman) {
+      console.log('🤖 Simulating human behavior...');
       await humanMouseMovement(page);
-      await page.waitForTimeout(randomDelay(1000, 2000));
+      await page.waitForTimeout(randomDelay(2000, 4000));
+
+      // Scrolling réaliste
+      await humanScroll(page);
+      await page.waitForTimeout(randomDelay(2000, 3000));
+
+      // Encore des mouvements
+      await humanMouseMovement(page);
+      await page.waitForTimeout(randomDelay(1500, 2500));
     }
 
     // Check if Cloudflare challenge is present
@@ -313,18 +353,19 @@ app.post('/scrape', async (req, res) => {
 
     if (cloudflarePresent) {
       console.log('Cloudflare detected, waiting longer...');
-      await page.waitForTimeout(5000);
+      await page.waitForTimeout(randomDelay(8000, 12000));
     }
 
     // Wait for network idle (dynamic content loaded)
     try {
-      await page.waitForLoadState('networkidle', { timeout: 15000 });
+      await page.waitForLoadState('networkidle', { timeout: 20000 });
       console.log('✅ Network idle reached');
     } catch (e) {
       console.log('⚠️ Network idle timeout, continuing...');
     }
 
-    // Additional wait for dynamic content
+    // AUGMENTATION: Attente finale plus longue
+    console.log(`⏳ Final wait: ${waitFor}ms`);
     await page.waitForTimeout(waitFor);
 
     // Get final HTML
