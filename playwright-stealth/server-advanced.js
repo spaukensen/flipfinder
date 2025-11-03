@@ -282,11 +282,14 @@ app.post('/scrape', async (req, res) => {
 
       if (stillBlocked) {
         console.log('❌ DataDome bypass failed');
+        // Get HTML BEFORE closing context
+        const failedHtml = await page.content();
+        const failedUrl = page.url();
         await context.close();
         return res.json({
           success: false,
-          html: await page.content(),
-          url: page.url(),
+          html: failedHtml,
+          url: failedUrl,
           dataDomeDetected: true,
           error: 'DataDome challenge could not be bypassed'
         });
