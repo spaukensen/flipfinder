@@ -1,0 +1,16 @@
+FROM mcr.microsoft.com/playwright:v1.48.0-jammy
+
+WORKDIR /app
+
+# Install dependencies
+COPY package*.json ./
+RUN npm ci --only=production
+
+# Copy the advanced server file
+COPY server-advanced.js ./
+
+# Expose port 3002 (different from interencheres on 3001)
+EXPOSE 3002
+
+# Run the advanced server
+CMD ["node", "server-advanced.js"]
