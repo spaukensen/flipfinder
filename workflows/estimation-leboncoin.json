@@ -87,8 +87,8 @@
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
       "position": [
-        0,
-        64
+        32,
+        48
       ]
     },
     {
@@ -107,7 +107,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=http://playwright-stealth:3001/scrape",
+        "url": "=http://playwright-leboncoin:3002/scrape",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
